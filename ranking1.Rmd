@@ -1,0 +1,108 @@
+
+
+```{r}
+#install.packages(c("readxl","dplyr","tidyr","stringr","PlackettLuce","qvcalc","ggplot2"))
+#install.packages("PlackettLuce")
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(PlackettLuce)
+library(qvcalc)
+library(ggplot2)
+
+# ---- 1) read the sheet ----
+# Adjust path as needed (Windows backslashes OK). Sheet name: "rankonly"
+xlsx_path <- "C://Users//John DeForest//Desktop//dWrangl//PFAS project phoebe//JED_cleaned_LobstermenResponses.xlsx"
+raw <- readxl::read_excel(xlsx_path, sheet = "rankonly")
+
+# If the sheet ONLY has the 6–7 rank columns, raw already equals the rank data.
+# If not sure, keep just the rank columns by detecting the bracketed labels:
+rank_cols <- str_detect(names(raw), "\\[.*\\]")  # headers contain [...] labels
+df_rank <- raw[, which(rank_cols)]
+
+# ---- 2) rename to short, readable column names (order matters) ----
+# Map the bracketed labels to short names; this uses the order they appear in your sheet.
+short_names <- c("shifts_habitat",
+                 "right_whale_regs",
+                 "market_crashes",
+                 "bait_cost",
+                 "labor_cost",
+                 "pfas",
+                 "wind_farms")
+
+# If your sheet has 6 columns for some reason, this will only keep the first 6 names.
+names(df_rank) <- head(short_names, ncol(df_rank))
+
+# Make sure values are numeric 1..7 and NAs where missing
+df_rank <- df_rank |> mutate(across(everything(), ~ suppressWarnings(as.integer(.x))))
+
+# Quick peek
+print(head(df_rank))
+
+# ---- 3) Plackett–Luce model (handles partial rows with NA) ----
+# Build rank matrix with NA for the missing item (those 6 rows)
+rank_mat <- as.matrix(df_rank)
+
+# Convert to rankings object (no ties in your data)
+R <- as.rankings(rank_mat)
+
+# Fit PL model
+fit <- PlackettLuce(R)
+summary(fit)  # check convergence
+
+# Worth scores (higher = more likely to be ranked #1 = more concerning)
+worth <- coef(fit, log = FALSE)
+worth <- sort(worth, decreasing = TRUE)
+
+pl_tbl <- tibble(issue = names(worth), worth = as.numeric(worth)) |>
+  arrange(desc(worth))
+pl_tbl
+
+# Quasi-variance intervals (good for uncertainty & pairwise comparisons)
+qv <- qvcalc(fit)
+qv_summ <- summary(qv)
+qv_summ  # has estimate & approx SE for each issue
+
+# Simple plot of worths with ~95% intervals
+qv_df <- as.data.frame(qv_summ)
+qv_df$issue <- rownames(qv_df)
+ggplot(qv_df, aes(x = reorder(issue, estimate), y = estimate)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = estimate - 1.96*SE, ymax = estimate + 1.96*SE), width = 0.15) +
+  coord_flip() +
+  labs(x = "Issue", y = "Worth (PL; higher = more concerning)",
+       title = "Overall concern (Plackett–Luce) with ~95% intervals")
+
+# ---- 4) Sensitivity check: mean ranks on complete cases only ----
+cc <- df_rank |> filter(if_all(everything(), ~ !is.na(.x)))  # drops the 6 partial rows
+long_cc <- cc |>
+  mutate(respondent = row_number()) |>
+  pivot_longer(-respondent, names_to = "issue", values_to = "rank")
+
+borda_cc <- long_cc |>
+  group_by(issue) |>
+  summarise(n = n(),
+            mean_rank = mean(rank),
+            sd_rank = sd(rank),
+            se_rank = sd_rank/sqrt(n), .groups = "drop") |>
+  arrange(mean_rank)
+
+borda_cc
+
+# Optional plot of mean ranks (lower = more concerning)
+ggplot(borda_cc, aes(x = reorder(issue, mean_rank), y = mean_rank)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = mean_rank - 1.96*se_rank,
+                    ymax = mean_rank + 1.96*se_rank),
+                width = 0.15) +
+  coord_flip() +
+  labs(x = "Issue", y = "Mean rank (1 = most concerned)",
+       title = "Complete-case average ranks (±95% CI)")
+
+# ---- 5) Compact “overall rank” from PL worths ----
+overall_rank <- pl_tbl |>
+  mutate(overall_rank = dense_rank(desc(worth)))
+overall_rank
+
+```
