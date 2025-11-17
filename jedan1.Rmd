@@ -1,0 +1,1597 @@
+
+
+
+
+```{r}
+#df1 = read.csv("C://Users//John DeForest//Desktop//dWrangl//PFAS project phoebe//JED_cleaned_LobstermenResponses.csv")
+
+path <- "C://Users//John DeForest//Desktop//dWrangl//PFAS project phoebe//lobster_clean2.csv"
+d <- read.csv(path, check.names = FALSE)   # <- avoids make.names()
+names(d) <- gsub("[ \t]+", "_", names(d))
+names(d) <- gsub("[^A-Za-z0-9_]+", "_", names(d))  # kill ?, /, (), etc.
+#print(names(d), quote = TRUE)
+#head(d)
+names(d)[names(d) == "_BINARY_Y_N"] <- "ZBINARY_Y_N"
+names(d)[names(d) == "_CAT_WHY_YES___how_did_they_deal_with_it_categories_"] <-
+  "ZCAT_WHY_YES___how_did_they_deal_with_it_categories_"
+
+View(names(d))
+#head(d[["Are_you_aware_of_the_human_health_risks_associated_with_PFAS_exposure?"]])
+
+head(d$Are_you_aware_of_the_human_health_risks_associated_with_PFAS_exposure_)
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(ggplot2)
+library(scales)
+nm <- names(d)
+# replace NA/blank names with placeholders
+blank_idx <- which(is.na(nm) | nm == "")
+nm[blank_idx] <- paste0("V", blank_idx)
+# sanitize punctuation -> "_", collapse/trim
+nm <- gsub("[^A-Za-z0-9_]+", "_", nm)
+nm <- gsub("_+", "_", nm)
+nm <- gsub("^_+|_+$", "", nm)
+# make names unique to avoid dplyr error
+nm <- make.unique(nm, sep = "__")
+names(d) <- nm
+
+zone_col <- grep("lobster_*zone|lobster\\.zone|^zone$", names(d), 
+                 ignore.case = TRUE, value = TRUE)[1]
+
+# find the cleaned "Are you aware..." col (may have trailing _ from cleaning)
+are_col <- grep("^Are_you_aware_of_the_human_health_risks_associated_with_PFAS_exposure_*$",
+                names(d), value = TRUE)[1]
+
+stopifnot(!is.na(zone_col), !is.na(are_col))
+
+d_long <- d %>%
+  mutate(
+    LobsterZone = str_replace_all(as.character(.data[[zone_col]]), "\\band\\b", ","),
+    LobsterZone = str_squish(LobsterZone),
+    AreRaw = tolower(as.character(.data[[are_col]])),
+    AreYN = case_when(
+      AreRaw %in% c("yes","y","1","true","t") ~ "Yes",
+      AreRaw %in% c("no","n","0","false","f") ~ "No",
+      TRUE ~ NA_character_
+    )
+  ) %>%
+  filter(!is.na(LobsterZone), LobsterZone != "", !is.na(AreYN)) %>%
+  separate_rows(LobsterZone, sep = "\\s*[;,/\\&]+\\s*") %>%
+  mutate(LobsterZone = str_trim(LobsterZone))
+
+zone_counts <- d_long |>
+  dplyr::count(LobsterZone, name = "n")
+
+# map: "Zone F" -> "Zone F\n(n=23)"
+lab_map <- setNames(
+  paste0(zone_counts$LobsterZone, "\n(n=", zone_counts$n, ")"),
+  zone_counts$LobsterZone
+)
+
+ggplot(d_long, aes(x = LobsterZone, fill = AreYN)) +
+  geom_bar(position = "fill") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  scale_x_discrete(labels = lab_map) +
+  labs(x = "Lobster Zone", 
+  y = "Percent within zone", 
+  fill = "Response",
+  title="Are you aware of the human health risks associated with PFAS exposure? (By Zone)") +
+  theme_minimal(base_size = 12)
+
+```
+
+```{r}
+
+head(d$Reconcat)
+# 0) Build the two Yes/No variables from the ORIGINAL 'd' (not exploded)
+# Detect your "Are you..." column again if needed:
+are_col <- grep("^Are_you_aware_of_the_human_health_risks_associated_with_PFAS_exposure_*$",
+                names(d), value = TRUE)[1]
+
+df_pair <- d %>%
+  transmute(
+    AreYN = case_when(
+      tolower(as.character(.data[[are_col]])) %in% c("yes","y","1","true","t") ~ "Yes",
+      tolower(as.character(.data[[are_col]])) %in% c("no","n","0","false","f") ~ "No",
+      TRUE ~ NA_character_
+    ),
+    ReconcatYN = case_when(
+      is.na(Reconcat) ~ NA_character_,
+      tolower(as.character(Reconcat)) == "no" ~ "No",
+      TRUE ~ "Yes"   # anything other than "No" -> Yes
+    )
+  ) %>%
+  filter(!is.na(AreYN), !is.na(ReconcatYN))
+
+# contingency with row percents (percent by AreYN)
+tab <- df_pair %>%
+  count(AreYN, ReconcatYN, name = "n") %>%
+  group_by(AreYN) %>%
+  mutate(pct_row = n / sum(n)) %>%
+  ungroup()
+
+ggplot(tab, aes(x = ReconcatYN, y = AreYN, fill = n)) +
+  geom_tile() +
+  geom_text(aes(label = paste0("n=", n, "\n", percent(pct_row, accuracy = 1))), size = 3.5) +
+  labs(x = "Reconcat → (No vs. otherwise = Yes)",
+       y = "Are you aware… (Yes/No)",
+       fill = "Count",
+       title = "Agreement between self-reported awareness and Reconcat") +
+  theme_minimal(base_size = 12)
+
+
+```
+
+```{r}
+#conc hum health pfas VS Would you like there to be research done to monitor PFAS levels in lobsters? 
+
+d$Would_you_like_there_to_be_research_done_to_monitor_PFAS_levels_in_lobsters
+are_col <- grep("^Are_you_aware_of_the_human_health_risks_associated_with_PFAS_exposure_*$",
+                names(d), value = TRUE)[1]
+
+# Exact (cleaned) column name for the new question
+monitor_col <- "Would_you_like_there_to_be_research_done_to_monitor_PFAS_levels_in_lobsters"
+
+# Build paired Yes/No vars (row = person)
+df_pair2 <- d %>%
+  transmute(
+    AreYN = case_when(
+      tolower(as.character(.data[[are_col]])) %in% c("yes","y","1","true","t") ~ "Yes",
+      tolower(as.character(.data[[are_col]])) %in% c("no","n","0","false","f") ~ "No",
+      TRUE ~ NA_character_
+    ),
+    MonitorYN = {
+      v <- tolower(as.character(.data[[monitor_col]]))
+      # Missing -> No; anything not explicitly No -> Yes
+      ifelse(is.na(v) | v %in% c("no","n","0","false","f"), "No", "Yes")
+    }
+  ) %>%
+  filter(!is.na(AreYN))  # keep if we have the AreYN answer
+
+# contingency with row (AreYN) percents
+tab2 <- df_pair2 %>%
+  count(AreYN, MonitorYN, name = "n") %>%
+  group_by(AreYN) %>%
+  mutate(pct_row = n / sum(n)) %>%
+  ungroup()
+
+ggplot(tab2, aes(x = MonitorYN, y = AreYN, fill = n)) +
+  geom_tile() +
+  geom_text(aes(label = paste0("n=", n, "\n", percent(pct_row, accuracy = 1))),
+            size = 3.5,color="white") +
+  labs(
+    x = "Would like research to monitor PFAS in lobsters (Yes/No; missing→No)",
+    y = "Aware of PFAS health risks (Yes/No)",
+    fill = "Count",
+    title = "Agreement: Awareness vs Preference for PFAS Monitoring Research"
+  ) +
+  theme_minimal(base_size = 12)
+
+m2 <- xtabs(~ AreYN + MonitorYN, data = df_pair2)
+mcnemar.test(m2)
+
+```
+
+
+```{r}
+#d$Do_you_think_consumers_would_eat_less_lobster_if_they_learned_of_the_presence_of_PFAS_in_lobsters
+#d$Would_you_like_there_to_be_research_done_to_monitor_PFAS_levels_in_lobsters
+eatless_col  <- "Do_you_think_consumers_would_eat_less_lobster_if_they_learned_of_the_presence_of_PFAS_in_lobsters"
+monitor_col  <- "Would_you_like_there_to_be_research_done_to_monitor_PFAS_levels_in_lobsters"
+
+# Build paired Y/N variables
+df_pair <- d %>%
+  transmute(
+    EatLessYN = case_when(
+      tolower(as.character(.data[[eatless_col]])) %in% c("yes","y","1","true","t") ~ "Yes",
+      tolower(as.character(.data[[eatless_col]])) %in% c("no","n","0","false","f") ~ "No",
+      TRUE ~ NA_character_
+    ),
+    MonitorYN = {
+      v <- tolower(as.character(.data[[monitor_col]]))
+      # Treat missing as No
+      ifelse(is.na(v) | v %in% c("no","n","0","false","f"), "No",
+             ifelse(v %in% c("yes","y","1","true","t"), "Yes", "No"))
+    }
+  ) %>%
+  filter(!is.na(EatLessYN)) %>%
+  mutate(
+    EatLessYN = factor(EatLessYN, levels = c("No","Yes")),
+    MonitorYN = factor(MonitorYN, levels = c("No","Yes"))
+  )
+
+# 2x2 with row (EatLessYN) percentages
+tab <- df_pair %>%
+  count(EatLessYN, MonitorYN, name = "n") %>%
+  group_by(EatLessYN) %>%
+  mutate(pct_row = n / sum(n)) %>%
+  ungroup()
+
+ggplot(tab, aes(x = MonitorYN, y = EatLessYN, fill = n)) +
+  geom_tile() +
+  geom_text(aes(label = paste0("n=", n, "\n", percent(pct_row, 1)),
+  size = 5,color="white")) +
+  labs(
+    x = "Would like research to monitor PFAS in lobsters (Yes/No; missing→No)",
+    y = "Think consumers would eat less if PFAS present (Yes/No)",
+    fill = "Count",
+    title = "Consumers eat less?  vs  Preference for PFAS Monitoring Research"
+  ) +
+  theme_minimal(base_size = 12)
+
+```
+
+
+```{r}
+#age awareness viz
+#age x axis continuous
+#awareneness binary Yes/No
+
+#for several questions: 
+#Reconcat	( Are you aware of any sources of pollution near your fishing grounds?)
+#Have you previously heard of PFAS, also known as "forever chemicals"?	 
+#Do you know if PFAS is an issue in Maine? BINARY	
+#When you think about pollution in fisheries, do you think about PFAS as a pollutant?
+# Are you aware of the human health risks associated with PFAS exposure?
+# How concerned are you about PFAS contamination in lobsters?
+head(d$Reconcat)
+head(d$Age)
+d$Have_you_previously_heard_of_PFAS__also_known_as__forever_chemicals_
+trim_lower <- function(x) tolower(trimws(x))
+is_no <- function(x) !is.na(x) & trim_lower(x) == "no"
+count_commas <- function(x) {
+  # returns number of commas in each string (0 if none/NA)
+  y <- ifelse(is.na(x), "", x)
+  nchar(gsub("[^,]", "", y), type = "chars", allowNA = TRUE)
+}
+d$source_count <- ifelse(is_no(d$Reconcat), 0L,
+                         ifelse(is.na(d$Reconcat), 0L, count_commas(d$Reconcat) + 1L))
+## ---- 3) Binary awareness from source_count ----
+# Aware = Yes if at least one named source; else No
+d$aware_bin <- ifelse(d$source_count > 0L, 1L, 0L)
+d$aware_yn  <- factor(ifelse(d$aware_bin == 1L, "Yes", "No"), levels = c("No", "Yes"))
+## ---- 4) Quick checks / tabulations ----
+cat("\nAwareness counts (derived from Reconcat):\n")
+print(table(d$aware_yn, useNA = "ifany"))
+cat("\nSummary of source_count:\n")
+print(summary(d$source_count))
+## ---- 5) Viz A: Distribution of source_count ----
+op <- par(no.readonly = TRUE)
+par(mar = c(4,4,2,1))
+hist(d$source_count,
+     breaks = seq(-0.5, max(d$source_count, na.rm = TRUE) + 0.5, by = 1),
+     main = "Number of Named Sources in Reconcat",
+     xlab = "source_count (No = 0; else commas + 1)",
+     ylab = "Frequency")
+
+## Ordinal score from Reconcat:
+## Rule (as requested): No = 1; otherwise = (#commas + 1)
+count_commas <- function(x) nchar(gsub("[^,]", "", ifelse(is.na(x), "", x)))
+rec_is_no   <- function(x) !is.na(x) & tolower(trimws(x)) == "no"
+
+score_ord <- ifelse(rec_is_no(d$Reconcat), 1L,
+                    ifelse(is.na(d$Reconcat), NA_integer_, count_commas(d$Reconcat) + 1L))
+cat("Score counts:\n"); print(table(score_ord, useNA = "ifany"))
+## Viz 1: Age by ordinal score (boxplot)
+ok <- is.finite(d$Age) & is.finite(score_ord)
+boxplot(d$Age[ok] ~ score_ord[ok],
+        xlab = "Reconcat ordinal score (No=1; else commas+1)",
+        ylab = "Age",
+        main = "Age by Reconcat ordinal score")
+## Viz 2: Scatter (Age on x, ordinal score on y) with LOWESS
+plot(d$Age[ok], jitter(score_ord[ok], amount = 0.08),
+     xlab = "Age", ylab = "Reconcat ordinal score",
+     pch = 16, cex = 0.7, main = "Reconcat score vs Age (jittered)")
+lines(lowess(d$Age[ok], score_ord[ok]), lwd = 2)
+
+#flip boxplot
+#categorize age by 10 years bins
+count_commas <- function(x) nchar(gsub("[^,]", "", ifelse(is.na(x), "", x)))
+rec_is_no    <- function(x) !is.na(x) & tolower(trimws(x)) == "no"
+score_ord <- ifelse(rec_is_no(d$Reconcat), 1L,
+                    ifelse(is.na(d$Reconcat), NA_integer_, count_commas(d$Reconcat) + 1L))
+## 10-year age bins
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10), right = FALSE, include.lowest = TRUE)
+## BOXPLOT: x = age bins, y = Reconcat ordinal score
+ok <- is.finite(score_ord) & !is.na(age_bins)
+boxplot(score_ord[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "Reconcat ordinal score (No=1; else commas+1)",
+        main = "Reconcat ordinal score vs Age (10-year bins)")
+xx <- as.numeric(age_bins[ok])
+points(jitter(xx, amount = 0.15), score_ord[ok],
+       pch = 16, cex = 1.7, col = adjustcolor("black", 0.9))
+
+
+    
+#AGE VS d$Have_you_previously_heard_of_PFAS__also_known_as__forever_chemicals_
+## 1) Map the Yes/No variable to 0/1 (keep NA as NA)
+v <- d$Have_you_previously_heard_of_PFAS__also_known_as__forever_chemicals_
+aware_bin <- ifelse(is.na(v), NA_integer_,
+                    ifelse(tolower(trimws(v)) == "yes", 1L, 0L))
+## 2) Build 10-year age bins
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10),
+                right = FALSE, include.lowest = TRUE)
+## 3) Boxplot: y = awareness (0/1), x = age bins
+ok <- is.finite(aware_bin) & !is.na(age_bins)
+boxplot(aware_bin[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "Heard of PFAS (No=0, Yes=1)",
+        main = "PFAS awareness vs Age (10-year bins)")
+## 4) Jittered points overlay
+set.seed(42)
+xx <- as.numeric(age_bins[ok])
+points(jitter(xx, amount = 0.15), aware_bin[ok],
+       pch = 16, cex = 0.6, col = adjustcolor("black", 0.4))
+## 5) Per-bin mean (proportion Yes) overlay
+m <- tapply(aware_bin[ok], age_bins[ok], mean)  # proportion Yes per bin
+lines(seq_along(m), m, lwd = 2)
+points(seq_along(m), m, pch = 19, cex = 0.8)
+## 6) Optional: print p
+
+
+
+
+#AGE vs  Do you know if PFAS is an issue in Maine?
+head(d$Do_you_know_if_PFAS_is_an_issue_in_Maine_)
+## 1) Ordinal score from the Maine question
+v <- d$Do_you_know_if_PFAS_is_an_issue_in_Maine_
+score_num <- ifelse(rec_is_no(v), 0L,
+                    ifelse(is.na(v), NA_integer_, count_commas(v) + 1L))
+
+cat("Score counts (No=0):\n"); print(table(score_num, useNA = "ifany"))
+
+## 2) 10-year age bins
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10), right = FALSE, include.lowest = TRUE)
+
+## 3) Boxplot: y = score_num, x = age bins (+ jitter overlay)
+ok <- is.finite(score_num) & !is.na(age_bins)
+boxplot(score_num[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "PFAS issue in Maine (No=0; else commas+1)",
+        main = "PFAS issue score vs Age (10-year bins)")
+
+set.seed(42)
+xx <- as.numeric(age_bins[ok])
+points(jitter(xx, 0.15), score_num[ok],
+       pch = 16, cex = 1.75, col = adjustcolor("black", 0.4))
+
+age1 = lm(score_num[ok]~ age_bins[ok])       
+summary(age1)
+#check against ANOVA
+#TODO - with A/B/C/etc stats on the graph in R^2/pval, 
+#all pvals are statsig for pairwise comparisons at the .05 level
+
+#now basic UNBINNED SCATTER:
+ok <- is.finite(d$Age) & is.finite(score_num)
+x  <- d$Age[ok]
+y  <- score_num[ok]
+fit <- lm(y ~ x)
+s   <- summary(fit)
+b0  <- coef(fit)[1]; b1 <- coef(fit)[2]
+r2  <- s$r.squared
+p   <- s$coefficients["x","Pr(>|t|)"]
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10),
+                right = FALSE, include.lowest = TRUE)
+pal <- rainbow(nlevels(age_bins))  # or: pal <- heat.colors(nlevels(age_bins))
+
+## Modify your plot() line to color by bin
+plot(x, jitter(y, 0.08), pch = 16, cex = 1.7,
+     col = pal[as.integer(age_bins[ok])],
+     xlab = "Age", ylab = "PFAS issue score (No=0; else commas+1)",
+     main = "Age vs PFAS issue score (colored by 10-yr age bin)")
+
+abline(fit, lwd = 2)
+usr <- par("usr")
+txt <- sprintf("score = %.2f + %.3f × Age\nR^2 = %.3f,  p = %.3g", b0, b1, r2, p)
+text(usr[1] + 0.02*(usr[2]-usr[1]),
+     usr[4] - 0.05*(usr[4]-usr[3]),
+     labels = txt, adj = c(0,1))
+legend("bottomright", legend = levels(age_bins), pch = 16, col = pal,
+       title = "Age bins", cex = 0.8, bty = "n")
+#TODO crank font size
+
+
+
+# AGE VS When you think about pollution in fisheries, do you think about PFAS as a pollutant?
+head(d$When_you_think_about_pollution_in_fisheries__do_you_think_about_PFAS_as_a_pollutant_)
+## 1) Map Yes/No -> 1/0 (keep missing as NA)
+v <- d$When_you_think_about_pollution_in_fisheries__do_you_think_about_PFAS_as_a_pollutant_
+pfas_pollutant <- ifelse(is.na(v), NA_integer_,
+                         ifelse(tolower(trimws(v)) == "yes", 1L, 0L))
+
+## 2) 10-year age bins
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10),
+                right = FALSE, include.lowest = TRUE)
+
+## 3) Boxplot by age bins with jitter + per-bin mean (proportion Yes)
+ok <- is.finite(pfas_pollutant) & !is.na(age_bins)
+boxplot(pfas_pollutant[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "Thinks PFAS is a pollutant (No=0, Yes=1)",
+        main = "PFAS-as-pollutant vs Age (10-year bins)")
+set.seed(42)
+xx <- as.numeric(age_bins[ok])
+points(jitter(xx, 0.15), pfas_pollutant[ok],
+       pch = 16, cex = 1.75, col = adjustcolor("black", 0.4))
+m <- tapply(pfas_pollutant[ok], age_bins[ok], mean)   # prop Yes per bin
+lines(seq_along(m), m, lwd = 2)
+points(seq_along(m), m, pch = 19, cex = 0.8)
+cat("\nProportion 'Yes' by age bin:\n"); print(round(m, 3))
+
+## 4) Logistic regression on continuous age + curve overlay
+ok2 <- is.finite(d$Age) & is.finite(pfas_pollutant)
+x <- d$Age[ok2]; y <- pfas_pollutant[ok2]
+plot(x, jitter(y, 0.08), pch = 16, cex = 0.7,
+     xlab = "Age", ylab = "Thinks PFAS is a pollutant (No=0, Yes=1)",
+     main = "Age vs PFAS-as-pollutant (scatter + logistic)")
+axis(2, at = c(0,1), labels = c("No","Yes"))
+fit <- glm(y ~ x, family = binomial)
+age_seq <- seq(min(x), max(x), length.out = 200)
+p_hat <- predict(fit, newdata = data.frame(x = age_seq), type = "response")
+lines(age_seq, p_hat, lwd = 2)
+
+## Quick OR per +1 year
+co <- summary(fit)$coefficients
+beta <- co["x","Estimate"]; se <- co["x","Std. Error"]
+OR <- exp(beta); CI <- exp(beta + c(-1,1)*1.96*se); p <- co["x","Pr(>|z|)"]
+cat(sprintf("\nLogistic OR per +1 year: %.3f (95%% CI %.3f–%.3f), p = %.4g\n",
+            OR, CI[1], CI[2], p))
+#NOT STATSIG, pval for slope is .388 > .05
+
+
+#AGE vs Are you aware of the human health risks associated with PFAS exposure?
+head(d$Are_you_aware_of_the_human_health_risks_associated_with_PFAS_exposure_)
+## 1) Map Yes/No -> 1/0 (keep NA as NA)
+v <- d$Are_you_aware_of_the_human_health_risks_associated_with_PFAS_exposure_
+aware_hh <- ifelse(is.na(v), NA_integer_,
+                   ifelse(tolower(trimws(v)) == "yes", 1L, 0L))
+
+## 2) 10-year age bins
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10),
+                right = FALSE, include.lowest = TRUE)
+
+## 3) Boxplot by age bins with jitter + per-bin mean (proportion Yes)
+ok <- is.finite(aware_hh) & !is.na(age_bins)
+boxplot(aware_hh[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "Aware of human-health risks (No=0, Yes=1)",
+        main = "PFAS human-health risk awareness vs Age (10-year bins)")
+set.seed(42)
+xx <- as.numeric(age_bins[ok])
+points(jitter(xx, 0.15), aware_hh[ok],
+       pch = 16, cex = 1.75, col = adjustcolor("black", 0.4))
+m <- tapply(aware_hh[ok], age_bins[ok], mean)   # prop Yes per bin
+lines(seq_along(m), m, lwd = 2)
+points(seq_along(m), m, pch = 19, cex = 0.8)
+cat("\nProportion 'Yes' by age bin:\n"); print(round(m, 3))
+
+## 4) Logistic regression on continuous age + curve overlay
+ok2 <- is.finite(d$Age) & is.finite(aware_hh)
+x <- d$Age[ok2]; y <- aware_hh[ok2]
+plot(x, jitter(y, 0.08), pch = 16, cex = 0.7,
+     xlab = "Age", ylab = "Aware of human-health risks (No=0, Yes=1)",
+     main = "Age vs PFAS human-health risk awareness (scatter + logistic)")
+axis(2, at = c(0,1), labels = c("No","Yes"))
+fit <- glm(y ~ x, family = binomial)
+age_seq <- seq(min(x), max(x), length.out = 200)
+p_hat <- predict(fit, newdata = data.frame(x = age_seq), type = "response")
+lines(age_seq, p_hat, lwd = 2)
+
+## Quick OR per +1 year
+co <- summary(fit)$coefficients
+beta <- co["x","Estimate"]; se <- co["x","Std. Error"]
+OR <- exp(beta); CI <- exp(beta + c(-1,1)*1.96*se); p <- co["x","Pr(>|z|)"]
+cat(sprintf("\nLogistic OR per +1 year: %.3f (95%% CI %.3f–%.3f), p = %.4g\n",
+            OR, CI[1], CI[2], p))
+#not statsig
+#but visually looks like a drop at 50years so lil binary binning analysis: 
+## 1) Define age groups
+grp <- ifelse(is.finite(d$Age), ifelse(d$Age < 50, "<50", "≥50"), NA)
+grp <- factor(grp, levels = c("<50","≥50"))
+
+## 2) 2×2 table (drops NAs)
+tab <- table(grp, aware_hh, useNA = "no")
+tab
+# rows: groups; cols: 0=No, 1=Yes
+
+## 3) Difference in proportions test (Yes rate)
+yes_counts <- tab[, "1"]
+ns         <- rowSums(tab)
+#counts are small, using fisher exact test:
+fisher.test(tab)
+#pval is .0565 >.05 so not technically statsig at .05 but close
+#odds ratio is .2053
+
+#boxplot binary viz: 
+ok <- is.finite(aware_hh) & !is.na(grp)
+boxplot(aware_hh[ok] ~ grp[ok],
+        xlab = "Age group",
+        ylab = "Aware of PFAS human-health risks (No=0, Yes=1)",
+        main = "Awareness vs Age group (<50 vs ≥50)")
+## Jittered points
+set.seed(42)
+xx <- as.numeric(grp[ok])
+points(jitter(xx, 0.15), aware_hh[ok],
+       pch = 16, cex = 1.65, col = adjustcolor("black", 0.4))
+## Group mean (proportion Yes) overlay
+m <- tapply(aware_hh[ok], grp[ok], mean)
+points(1:2, m, pch = 19, cex = 1.75)
+lines(1:2, m, lwd = 2)
+## Optional: label y-axis at 0/1
+axis(2, at = c(0,1), labels = c("No","Yes"))
+
+
+
+#AGE vs How concerned are you about PFAS contamination in lobsters?
+unique(d$How_concerned_are_you_about_PFAS_contamination_in_lobsters_)
+## 0) Clean + order the concern variable
+v <- d$How_concerned_are_you_about_PFAS_contamination_in_lobsters_
+concern <- factor(trimws(v),
+                  levels = c("Not concerned","Somewhat concerned","Very concerned"),
+                  ordered = TRUE)
+
+## Map to ordinal score: Not=0, Somewhat=1, Very=2
+concern_score <- as.integer(concern) - 1L
+## 10-year age bins
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10),
+                right = FALSE, include.lowest = TRUE)
+ok <- is.finite(concern_score) & !is.na(age_bins)
+boxplot(concern_score[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "Concern score (Not=0, Somewhat=1, Very=2)",
+        main = "Concern vs Age (10-year bins)")
+set.seed(42)
+xx <- as.numeric(age_bins[ok])
+points(jitter(xx, 0.15), concern_score[ok],
+       pch = 16, cex = 1.65, col = adjustcolor("black", 0.4))
+## Nonparametric difference across bins
+suppressWarnings(print(kruskal.test(concern_score[ok] ~ age_bins[ok])))
+
+
+#UNBINNED: continuous age: 
+ok2 <- is.finite(d$Age) & !is.na(concern)
+boxplot(d$Age[ok2] ~ concern[ok2],
+        xlab = "Concern level",
+        ylab = "Age",
+        main = "Age by concern level")
+set.seed(42)
+xx2 <- as.numeric(concern[ok2])
+points(jitter(xx2, 0.15), d$Age[ok2],
+       pch = 16, cex = 1.75, col = adjustcolor("black", 0.4))
+
+## Kruskal–Wallis across the three levels
+suppressWarnings(print(kruskal.test(d$Age[ok2] ~ concern[ok2])))
+
+## Ordinal trend proxy: Spearman between Age and concern_score
+ok3 <- is.finite(d$Age) & is.finite(concern_score)
+cat("\nSpearman rho (Age vs concern_score):\n")
+print(cor.test(d$Age[ok3], concern_score[ok3], method = "spearman"))
+
+
+
+#AGE vs How involved are you with the lobster fishery co-management system?
+unique(d$How_involved_are_you_with_the_lobster_fishery_co_management_system_)
+## 0) Clean + order the involvement variable (treat "" as NA)
+v <- d$How_involved_are_you_with_the_lobster_fishery_co_management_system_
+v[v == ""] <- NA
+involv <- factor(trimws(v),
+                 levels = c("Not involved","Somewhat involved","Very involved"),
+                 ordered = TRUE)
+
+## Ordinal score: Not=0, Somewhat=1, Very=2
+involv_score <- as.integer(involv) - 1L
+## 10-year age BINS
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10),
+                right = FALSE, include.lowest = TRUE)
+ok <- is.finite(involv_score) & !is.na(age_bins)
+boxplot(involv_score[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "Involvement score (Not=0, Somewhat=1, Very=2)",
+        main = "Co-management involvement vs Age (10-yr bins)")
+set.seed(42)
+xx <- as.numeric(age_bins[ok])
+points(jitter(xx, 0.15), involv_score[ok],
+       pch = 16, cex = 1.65, col = adjustcolor("black", 0.4))
+## Nonparametric difference across bins
+suppressWarnings(print(kruskal.test(involv_score[ok] ~ age_bins[ok])))
+#UGLY AS A MF^
+
+
+#UNBINNED CONTINUOUS AGE - nicer clearer story:
+ok2 <- is.finite(d$Age) & !is.na(involv)
+boxplot(d$Age[ok2] ~ involv[ok2],
+        xlab = "Co-management involvement",
+        ylab = "Age",
+        main = "Age by co-management involvement")
+set.seed(42)
+xx2 <- as.numeric(involv[ok2])
+points(jitter(xx2, 0.15), d$Age[ok2],
+       pch = 16, cex = 1.65, col = adjustcolor("black", 0.4))
+## Kruskal–Wallis across involvement levels
+suppressWarnings(print(kruskal.test(d$Age[ok2] ~ involv[ok2])))
+## Ordinal trend proxy: Spearman between Age and involvement score
+ok3 <- is.finite(d$Age) & is.finite(involv_score)
+cat("\nSpearman rho (Age vs involvement score):\n")
+print(cor.test(d$Age[ok3], involv_score[ok3], method = "spearman"))
+
+## Palette (one color per involvement level)
+lvl_cols <- c("Not involved" = "orange",
+              "Somewhat involved" = "lightblue",
+              "Very involved" = "lightgreen")
+
+pal     <- adjustcolor(unname(lvl_cols[levels(involv)]), alpha.f = 0.35)  # box fills
+pal_pts <- adjustcolor(unname(lvl_cols[levels(involv)]), alpha.f = 1.00)  # point colors
+## Colored boxplot
+boxplot(d$Age[ok2] ~ involv[ok2],
+        xlab = "Co-management involvement",
+        ylab = "Age",
+        main = "Age by co-management involvement",
+        col = pal, border = adjustcolor("black", 0.6))
+## Jittered points colored by group
+set.seed(42)
+xnum <- as.numeric(involv[ok2])
+points(jitter(xnum, 0.15), d$Age[ok2],
+       pch = 16, cex = 1.85, col = pal_pts[xnum])
+## Optional legend
+legend("topleft", legend = levels(involv),
+       fill = pal, border = adjustcolor("black", 0.6),
+       title = "Involvement", cex = 1.85, bty = "n")
+
+
+
+#AGE vs dependency on fishery: 
+#How dependent are you on the lobster fishery for your livelihood?
+unique(d$How_dependent_are_you_on_the_lobster_fishery_for_your_livelihood_)
+## 0) Clean + ordered factor ("" -> NA)
+v <- d$How_dependent_are_you_on_the_lobster_fishery_for_your_livelihood_
+v[v == ""] <- NA
+dep <- factor(trimws(v),
+              levels = c("not dependent (hobby etc.)",
+                         "somewhat dependent (have another source of income)",
+                         "highly dependent (only source of income)"),
+              ordered = TRUE)
+
+## Ordinal score: not=0, somewhat=1, highly=2
+dep_score <- as.integer(dep) - 1L
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10),
+                right = FALSE, include.lowest = TRUE)
+ok <- is.finite(dep_score) & !is.na(age_bins)
+boxplot(dep_score[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "Dependence score (not=0, some=1, high=2)",
+        main = "Dependence on lobster fishery vs Age (10-yr bins)")
+set.seed(42)
+xnum <- as.numeric(age_bins[ok])
+points(jitter(xnum, 0.15), dep_score[ok],
+       pch = 16, cex = 0.9, col = adjustcolor("black", 0.4))
+suppressWarnings(print(kruskal.test(dep_score[ok] ~ age_bins[ok])))
+#pval .5386
+
+#UNBINNED
+ok2 <- is.finite(d$Age) & !is.na(dep)
+boxplot(d$Age[ok2] ~ dep[ok2],
+        xlab = "Dependence on lobster fishery",
+        ylab = "Age",
+        main = "Age by dependence level")
+set.seed(42)
+gx <- as.numeric(dep[ok2])
+points(jitter(gx, 0.15), d$Age[ok2],
+       pch = 16, cex = 1.9, col = adjustcolor("black", 0.4))
+suppressWarnings(print(kruskal.test(d$Age[ok2] ~ dep[ok2])))
+## Ordinal trend: Spearman (Age vs 0/1/2 dependence score)
+ok3 <- is.finite(d$Age) & is.finite(dep_score)
+cat("\nSpearman rho (Age vs dependence score):\n")
+print(cor.test(d$Age[ok3], dep_score[ok3], method = "spearman"))
+#pvals not significant
+
+
+
+#Age vs: How much trust do you have in state agencies to monitor and respond to potential contamination issues?
+unique(d$How_much_trust_do_you_have_in_state_agencies_to_monitor_and_respond_to_potential_contamination_issues_)
+## 0) Clean + order the trust variable
+v <- d$How_much_trust_do_you_have_in_state_agencies_to_monitor_and_respond_to_potential_contamination_issues_
+v[v == ""] <- NA
+trust <- factor(trimws(v),
+                levels = c("No trust","Neutral/ambivalent","Trust"),
+                ordered = TRUE)
+## Ordinal score: No=0, Neutral=1, Trust=2
+trust_score <- as.integer(trust) - 1L
+## 10-year age bins
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10),
+                right = FALSE, include.lowest = TRUE)
+
+ok <- is.finite(trust_score) & !is.na(age_bins)
+boxplot(trust_score[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "Trust score (No=0, Neutral=1, Trust=2)",
+        main = "Trust in state agencies vs Age (10-yr bins)")
+set.seed(42)
+xnum <- as.numeric(age_bins[ok])
+points(jitter(xnum, 0.15), trust_score[ok],
+       pch = 16, cex = 1.9, col = adjustcolor("black", 0.4))
+## Nonparametric difference across bins
+suppressWarnings(print(kruskal.test(trust_score[ok] ~ age_bins[ok])))
+#.3586 pval
+
+#UNBINNED
+ok2 <- is.finite(d$Age) & !is.na(trust)
+boxplot(d$Age[ok2] ~ trust[ok2],
+        xlab = "Trust in state agencies",
+        ylab = "Age",
+        main = "Age by trust level")
+set.seed(42)
+xg <- as.numeric(trust[ok2])
+points(jitter(xg, 0.15), d$Age[ok2],
+       pch = 16, cex = 1.9, col = adjustcolor("black", 0.4))
+## Kruskal–Wallis across trust levels
+suppressWarnings(print(kruskal.test(d$Age[ok2] ~ trust[ok2])))
+#pval .2361
+#TODO anova or pairwise comparison of no trust vs trust for age diff
+## Ordinal trend proxy: Spearman between Age and trust_score
+ok3 <- is.finite(d$Age) & is.finite(trust_score)
+cat("\nSpearman rho (Age vs trust_score):\n")
+print(cor.test(d$Age[ok3], trust_score[ok3], method = "spearman"))
+
+
+#TODO
+#age vs ease to establish new fishing territory
+unique(d$How_easy_would_it_be_to_establish_a_new_fishing_territory_)
+## 0) Clean + ordered factor (treat "" as NA if present)
+v <- d$How_easy_would_it_be_to_establish_a_new_fishing_territory_
+v[v == ""] <- NA
+ease <- factor(trimws(v),
+               levels = c("Not possible","Possible","Very easy"),
+               ordered = TRUE)
+
+## Ordinal score: Not=0, Possible=1, Very easy=2
+ease_score <- as.integer(ease) - 1L
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10),
+                right = FALSE, include.lowest = TRUE)
+
+ok <- is.finite(ease_score) & !is.na(age_bins)
+boxplot(ease_score[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "Ease score (Not=0, Possible=1, Very easy=2)",
+        main = "Ease of establishing new territory vs Age (10-yr bins)")
+set.seed(42)
+xnum <- as.numeric(age_bins[ok])
+points(jitter(xnum, 0.15), ease_score[ok],
+       pch = 16, cex = 1.9, col = adjustcolor("black", 0.4))
+
+suppressWarnings(print(kruskal.test(ease_score[ok] ~ age_bins[ok])))
+
+#UNBINNED
+ok2 <- is.finite(d$Age) & !is.na(ease)
+boxplot(d$Age[ok2] ~ ease[ok2],
+        xlab = "Ease of establishing new territory",
+        ylab = "Age",
+        main = "Age by perceived ease")
+set.seed(42)
+gx <- as.numeric(ease[ok2])
+points(jitter(gx, 0.15), d$Age[ok2],
+       pch = 16, cex = 1.9, col = adjustcolor("black", 0.4))
+
+suppressWarnings(print(kruskal.test(d$Age[ok2] ~ ease[ok2])))
+
+## Ordinal trend proxy (monotonic): Spearman Age vs 0/1/2 score
+ok3 <- is.finite(d$Age) & is.finite(ease_score)
+cat("\nSpearman rho (Age vs ease_score):\n")
+print(cor.test(d$Age[ok3], ease_score[ok3], method = "spearman"))
+
+#barchart cuz age doesnt really change things, go w basic viz
+## Counts
+cts <- table(ease, useNA = "no")
+cts <- prop.table(table(ease, useNA = "no"))
+
+print(cts)
+## Bar chart (vertical)
+cols <- c("firebrick2","steelblue3","forestgreen")
+bp <- barplot(cts, col = cols, border = NA,
+              ylab = "Count", xlab = "Perceived ease",
+              main = "Ease of establishing a new fishing territory")
+
+## Add count labels on top
+text(x = bp, y = cts, labels = round(cts,2), pos = 3, cex = 0.9)
+
+
+#TODO
+#lobby management?
+unique(d$If_PFAS_were_detected_in_your_fishing_area_would_you__lobby_management_to_clean_up_the_source_)
+## 0) Clean + binary code (1 = very likely, 0 = somewhat likely)
+v <- d$If_PFAS_were_detected_in_your_fishing_area_would_you__lobby_management_to_clean_up_the_source_
+v[v == ""] <- NA
+lik <- factor(trimws(v), levels = c("somewhat likely","very likely"), ordered = TRUE)
+lik_bin <- ifelse(is.na(lik), NA_integer_, as.integer(lik) - 1L)  # 0/1
+
+## A) 10-year age bins → boxplot + jitter + per-bin mean (prop very likely)
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10), right = FALSE, include.lowest = TRUE)
+
+ok <- is.finite(lik_bin) & !is.na(age_bins)
+boxplot(lik_bin[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "Very likely (0/1)",
+        main = "Lobby management: very likely vs age (10-yr bins)")
+set.seed(42)
+xx <- as.numeric(age_bins[ok])
+points(jitter(xx, 0.15), lik_bin[ok], pch = 16, cex = 1.8, col = adjustcolor("black", 0.4))
+m <- tapply(lik_bin[ok], age_bins[ok], mean)          # proportion very likely per bin
+lines(seq_along(m), m, lwd = 2); points(seq_along(m), m, pch = 19, cex = 0.9)
+cat("\nProportion 'very likely' by age bin:\n"); print(round(m, 3))
+
+## B) Continuous age → scatter (jittered 0/1) + logistic curve
+ok2 <- is.finite(d$Age) & is.finite(lik_bin)
+x <- d$Age[ok2]; y <- lik_bin[ok2]
+plot(x, jitter(y, 0.08), pch = 16, cex = 0.75,
+     xlab = "Age", ylab = "Very likely (0/1)",
+     main = "Very likely vs Age (scatter + logistic)")
+axis(2, at = c(0,1), labels = c("somewhat","very"))
+fit <- glm(y ~ x, family = binomial)
+age_seq <- seq(min(x), max(x), length.out = 200)
+p_hat <- predict(fit, newdata = data.frame(x = age_seq), type = "response")
+lines(age_seq, p_hat, lwd = 2)
+co <- summary(fit)$coefficients
+OR <- exp(co["x","Estimate"]); CI <- exp(co["x","Estimate"] + c(-1,1)*1.96*co["x","Std. Error"])
+cat(sprintf("\nLogistic OR per +1 year: %.3f (95%% CI %.3f–%.3f), p=%.4g\n",
+            OR, CI[1], CI[2], co["x","Pr(>|z|)"]))
+## C) Quick <50 vs ≥50 difference in proportions (very likely)
+grp <- ifelse(is.finite(d$Age), ifelse(d$Age < 50, "<50", "≥50"), NA)
+grp <- factor(grp, levels = c("<50","≥50"))
+tab <- table(grp, lik_bin, useNA = "no")  # cols: 0,1
+if (all(c("0","1") %in% colnames(tab))) {
+  prop.test(x = tab[, "1"], n = rowSums(tab), correct = FALSE)
+} else {
+  cat("\nNot enough variation to run prop.test (one level missing).\n")
+}
+#nothing statsig, just report pie chart basics.
+
+
+#age and would you leave the fishery
+unique(d$If_PFAS_were_detected_in_your_fishing_area_would_you__leave_the_fishery_)
+## 0) Clean + ordered factor ("" -> NA)
+v <- d$If_PFAS_were_detected_in_your_fishing_area_would_you__leave_the_fishery_
+v[v == ""] <- NA
+leave <- factor(trimws(v),
+                levels = c("not likely","somewhat likely","very likely"),
+                ordered = TRUE)
+## Ordinal score: not=0, somewhat=1, very=2
+leave_score <- as.integer(leave) - 1L
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10),
+                right = FALSE, include.lowest = TRUE)
+ok <- is.finite(leave_score) & !is.na(age_bins)
+boxplot(leave_score[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "Leave score (not=0, some=1, very=2)",
+        main = "Likelihood of leaving the fishery vs Age (10-yr bins)")
+set.seed(42)
+xnum <- as.numeric(age_bins[ok])
+points(jitter(xnum, 0.15), leave_score[ok],
+       pch = 16, cex = 1.9, col = adjustcolor("black", 0.4))
+suppressWarnings(print(kruskal.test(leave_score[ok] ~ age_bins[ok])))
+ok2 <- is.finite(d$Age) & !is.na(leave)
+boxplot(d$Age[ok2] ~ leave[ok2],
+        xlab = "Likelihood of leaving the fishery",
+        ylab = "Age",
+        main = "Age by likelihood of leaving")
+set.seed(42)
+gx <- as.numeric(leave[ok2])
+points(jitter(gx, 0.15), d$Age[ok2],
+       pch = 16, cex = 1.9, col = adjustcolor("black", 0.4))
+suppressWarnings(print(kruskal.test(d$Age[ok2] ~ leave[ok2])))
+## Ordinal trend proxy: Spearman (Age vs 0/1/2 score)
+ok3 <- is.finite(d$Age) & is.finite(leave_score)
+cat("\nSpearman rho (Age vs leave_score):\n")
+print(cor.test(d$Age[ok3], leave_score[ok3], method = "spearman"))
+grp <- ifelse(is.finite(d$Age), ifelse(d$Age < 50, "<50", "≥50"), NA)
+grp <- factor(grp, levels = c("<50","≥50"))
+very_bin <- ifelse(is.na(leave), NA_integer_, as.integer(leave) == 3L)  # 1 if "very likely"
+tab <- table(grp, very_bin, useNA = "no")
+print(tab)
+
+if (all(c("FALSE","TRUE") %in% colnames(tab))) {
+  prop.test(x = tab[, "TRUE"], n = rowSums(tab), correct = FALSE)
+} else {
+  cat("\nNot enough variation to run prop.test (one level missing).\n")
+}
+grp <- ifelse(is.finite(d$Age), ifelse(d$Age < 50, "<50", "≥50"), NA)
+grp <- factor(grp, levels = c("<50","≥50"))
+## Binary: very likely = 1, others = 0
+very_bin <- ifelse(is.na(leave), NA_integer_, as.integer(leave) == 3L)
+## Build 2×2 table
+tab <- table(grp, very_bin, useNA = "no")
+print(tab)
+## Fisher's Exact Test
+fisher.test(tab)
+#.3476 pval - not statsig duh bc sample size counts are so small (2,3,etc)
+
+
+## age voice concerns regarding
+unique(d$Do_you_feel_you_could_voice_concerns_regarding_pollution_to_management_)
+## 0) Map Yes/No → 1/0 (keep NA as NA)
+v <- d$Do_you_feel_you_could_voice_concerns_regarding_pollution_to_management_
+voice_bin <- ifelse(is.na(v), NA_integer_,
+                    ifelse(tolower(trimws(v)) == "yes", 1L, 0L))
+amin <- floor(min(d$Age, na.rm = TRUE)/10)*10
+amax <- ceiling(max(d$Age, na.rm = TRUE)/10)*10
+age_bins <- cut(d$Age, breaks = seq(amin, amax, by = 10),
+                right = FALSE, include.lowest = TRUE)
+
+ok <- is.finite(voice_bin) & !is.na(age_bins)
+boxplot(voice_bin[ok] ~ age_bins[ok],
+        xlab = "Age (10-year bins)",
+        ylab = "Feels they can voice concerns (No=0, Yes=1)",
+        main = "Voice concerns vs Age (10-yr bins)")
+set.seed(42)
+xx <- as.numeric(age_bins[ok])
+points(jitter(xx, 0.15), voice_bin[ok],
+       pch = 16, cex = 0.75, col = adjustcolor("black", 0.4))
+m <- tapply(voice_bin[ok], age_bins[ok], mean)   # proportion Yes per bin
+lines(seq_along(m), m, lwd = 2); points(seq_along(m), m, pch = 19, cex = 0.9)
+cat("\nProportion 'Yes' by age bin:\n"); print(round(m, 3))
+#not really a trend. 
+
+
+
+# COMMUNITY
+unique(d$NEW_Will_PFAS_be_dealt_with_the_same_way_)
+#showing what drives resilience or hinders it
+#whats the largest factor when issues hit the fishery
+#and how they're dealt with
+#for the importance factors explainer for the above var^
+#adaptability and resilience
+#both strengths and weaknesses here - lobster fishery in dealing w probs n challenges
+unique(d$Importance_factors_mentioned_implied)
+#how many incl strong com 
+#how many incl indep 
+#key factors^ infl resilience
+#factors that improve resilience in green/hinder in red
+#denial, apathy are def ag resilience
+#work w orgs helps resilience
+
+v <- d$NEW_Will_PFAS_be_dealt_with_the_same_way_
+v[v == ""] <- NA
+same_pf <- factor(trimws(v), levels = c("y","n","m"))
+## Counts
+cts <- table(same_pf, useNA = "no")
+print(cts)
+## Bar chart
+cols <- c("y" = "forestgreen",
+          "n" = "firebrick2",
+          "m" = "steelblue3")
+bp <- barplot(cts,
+              col    = cols[names(cts)],
+              border = NA,
+              xlab   = "Will PFAS be dealt with the same way?",
+              ylab   = "Count",
+              main   = "Perceptions of how PFAS will be dealt with")
+text(bp, cts, labels = cts, pos = 3, cex = 0.9)
+
+ok <- is.finite(d$Age) & !is.na(same_pf)
+## 3) Simple colored boxplot: x = y/n/m, y = Age
+cols <- c("y" = "forestgreen",
+          "n" = "firebrick2",
+          "m" = "steelblue3")
+
+boxplot(d$Age[ok] ~ same_pf[ok],
+        xlab = "Will PFAS be dealt with the same way? (y/n/m)",
+        ylab = "Age",
+        main = "Age by view on how PFAS will be dealt with",
+        col = cols[levels(same_pf)],
+        border = adjustcolor("black", 0.6))
+## 4) Jittered points over the boxes
+set.seed(42)
+xnum <- as.numeric(same_pf[ok])
+points(jitter(xnum, 0.15), d$Age[ok],
+       pch = 16, cex = 0.9,
+       col = adjustcolor(cols[as.character(same_pf[ok])], alpha.f = 0.9))
+## 5) Kruskal–Wallis test for age differences across y/n/m
+suppressWarnings(print(kruskal.test(d$Age[ok] ~ same_pf[ok])))
+#p=.44. no diff.
+
+
+
+#now with importance factors
+imp_raw <- d$Importance_factors_mentioned_implied
+imp_raw[imp_raw == ""] <- NA
+imp_raw[imp_raw =="m"]<- NA
+
+## Normalize specific labels so they match your color key
+imp_raw <- gsub("resourceful/adaptive", "resourceful", imp_raw, fixed = TRUE)
+
+# split on comma, trim whitespace, lowercase for safety
+tags_list <- strsplit(imp_raw, ",")
+tags_list <- lapply(tags_list, function(x) trimws(tolower(x)))
+
+## 3) Build long data.frame of (same_pf, tag) pairs
+lens <- sapply(tags_list, length)
+df_tags <- data.frame(
+  same_pf = rep(same_pf, times = ifelse(is.na(imp_raw), 0L, lens)),
+  tag     = unlist(tags_list)
+)
+
+# Drop NAs/empty tags
+df_tags <- df_tags[!is.na(df_tags$same_pf) & df_tags$tag != "" & !is.na(df_tags$tag), ]
+
+## 4) Make a tag × y/n/m table
+tab_full <- table(df_tags$tag, df_tags$same_pf)
+
+## 👉 Use ALL tags (no top-5 filter)
+tab_top <- tab_full   # all rows
+
+## 5) Convert to column-wise proportions → 100% stacked bars
+prop_top <- prop.table(tab_top, margin = 2)  # margin=2 → within each y/n/m
+
+## 6) 100% stacked barplot
+cols <- c("strong com"    = "darkgreen",
+          "indep"         = "#ff5e00",
+          "orgs"          = "darkolivegreen3",
+          "apathy"        = "firebrick3",
+          "resourceful"   = "lightgreen",
+          "marketability" = "mediumpurple3",
+          "depends"       = "gray50",
+          "smaller scale" = "grey",
+          "unknown"       = "gray80")
+
+cols_use <- cols[rownames(prop_top)]
+cols_use[is.na(cols_use)] <- "gray60"  # fallback for any unexpected tag
+
+bp <- barplot(prop_top,
+              col    = cols_use,
+              ylim   = c(0, 1),
+              ylab   = "Proportion within y/n/m group",
+              xlab   = "Will PFAS be dealt with the same way? (y/n/m)",
+              main   = "Factors mentioned vs PFAS dealt the same way (y/n/m)")
+
+legend("topright",
+       legend = rownames(prop_top),
+       fill   = cols_use,
+       title  = "Factors",
+       cex    = 2.1, bty = "n")
+
+cat("\nTag counts by PFAS y/n/m:\n")
+print(tab_top)
+
+
+
+unique(d$Importance_factors_mentioned_implied)
+#TODO get rid of the maybe column
+#independence red 1, apathy 2 reddish
+#TODO:
+#orgs 2/strong com green 1/resourceful(ness) 3 on green gradient
+#smaller scale, marketability neutral color - maybe white/yellow
+#TODO fix colors to nice gradient palette for pos/neg groups above^
+
+#marketability as a way to rally ppl
+
+#TODO: 
+#have you or someone ...had to stop...why ts
+#Have you or people you know ever had to stop lobstering because of a
+# regulation or environmental issue? How did you deal with it? 
+#How did it affect your identity as a lobsterman?
+#<CAT WHY YES? (how did they deal with it categories)
+head(d$Have_you_or_people_you_know_ever_had_to_stop_lobstering_because_of_a_regulation_or_environmental_issue__How_did_you_deal_with_it__How_did_it_affect_your_identity_as_a_lobsterman_)
+#<BINARY Y/N
+#<CAT WHY YES? (how did they deal with it categories)
+unique(d$ZBINARY_Y_N)
+unique(d$ZCAT_WHY_YES___how_did_they_deal_with_it_categories_)
+
+imp_raw <- d$ZCAT_WHY_YES___how_did_they_deal_with_it_categories_
+imp_raw[imp_raw == ""] <- NA
+
+## Split on commas
+tags_list <- strsplit(imp_raw, ",")
+
+## For NA rows, force empty list elements so lens + unlist match
+tags_list[is.na(imp_raw)] <- list(character(0))
+
+## Trim whitespace
+tags_list <- lapply(tags_list, function(x) trimws(x))
+
+## Build long df
+lens <- sapply(tags_list, length)
+
+df_tags <- data.frame(
+  ZBINARY_Y_N = rep(bin, times = lens),
+  tag         = unlist(tags_list)
+)
+
+## Drop NAs / empties just in case
+df_tags <- df_tags[!is.na(df_tags$ZBINARY_Y_N) &
+                     !is.na(df_tags$tag) &
+                     df_tags$tag != "", ]
+tab_full <- table(df_tags$tag, df_tags$ZBINARY_Y_N)
+prop_tab <- prop.table(tab_full, margin = 2)
+
+cols <- c("New Regulations"   = "#1b9e77",
+          "Monterey"          = "#d95f02",
+          "Insecticides"      = "#7570b3",
+          "Warming waters"    = "#e7298a",
+          "Mercury"           = "#66a61e",
+          "Oil Spill"         = "#e6ab02",
+          "Cultural Shift"    = "#a6761d")
+
+cols_use <- cols[rownames(prop_tab)]
+cols_use[is.na(cols_use)] <- "gray60"
+
+bp <- barplot(prop_tab,
+              col    = cols_use,
+              ylim   = c(0, 1),
+              ylab   = "Proportion within No / Yes group",
+              xlab   = "ZBINARY_Y_N",
+              main   = "How they dealt with it: tags vs ZBINARY_Y_N")
+
+legend("topright",
+       legend = rownames(prop_tab),
+       fill   = cols_use,
+       title  = "Factors mentioned",
+       cex    = 2, bty = "n")
+
+cat("\nTag counts by ZBINARY_Y_N:\n")
+print(tab_full)
+## Overall tag counts (ignoring No/Yes)
+tag_counts <- table(df_tags$tag)
+tag_props  <- prop.table(tag_counts)
+
+print(tag_counts)
+print(round(tag_props, 3))
+
+## Proportion barplot by tag
+bp <- barplot(tag_props,
+              las   = 2,  # rotate x labels vertical
+              ylim  = c(0, max(tag_props) * 1.15),
+              ylab  = "Proportion of all mentions",
+              xlab  = "Tag",
+              main  = "Overall distribution of 'how they dealt with it' tags")
+## Add proportion labels on top
+text(bp, tag_props, labels = round(tag_props, 2),
+     pos = 3, cex = 0.8)
+bin <- d$ZBINARY_Y_N   # values "Yes" / "No"
+sum(bin == "No",  na.rm = TRUE)
+sum(bin == "Yes", na.rm = TRUE)
+13/(13+21)
+21/(13+21)
+
+#proportion bar chart
+#first col: Yes/No overal
+#second col: reasons proportion breakdown/categories overall
+## 1) Overall Yes/No proportions
+## 1) Overall Yes/No proportions → 100% stacked bar
+bin <- d$ZBINARY_Y_N
+bin[bin == ""] <- NA
+bin <- factor(trimws(bin), levels = c("No","Yes"))
+
+bin_props <- prop.table(table(bin, useNA = "no"))
+
+# Put into a 2×1 matrix so barplot makes ONE stacked bar
+mat_bin <- matrix(bin_props,
+                  nrow = length(bin_props),
+                  dimnames = list(names(bin_props), "All"))
+
+## 2) Overall tag proportions → 100% stacked bar
+tag_props <- prop.table(table(df_tags$tag))
+mat_tag <- matrix(tag_props,
+                  nrow = length(tag_props),
+                  dimnames = list(names(tag_props), "All"))
+
+## 3) Colors
+cols_bin <- c("No" = "firebrick2", "Yes" = "forestgreen")
+
+cols_tag <- c("New Regulations"   = "#1b9e77",
+              "Monterey"          = "#d95f02",
+              "Insecticides"      = "#7570b3",
+              "Warming waters"    = "#e7298a",
+              "Mercury"           = "#66a61e",
+              "Oil Spill"         = "#e6ab02",
+              "Cultural Shift"    = "#a6761d")
+
+cols_tag_use <- cols_tag[rownames(mat_tag)]
+cols_tag_use[is.na(cols_tag_use)] <- "gray60"  # fallback
+
+## 4) Side-by-side stacked 100% bars
+op <- par(no.readonly = TRUE)
+par(mfrow = c(1, 2), mar = c(5, 4, 4, 1))
+
+## Left: 100% stacked Yes/No
+bp1 <- barplot(mat_bin,
+               col   = cols_bin[rownames(mat_bin)],
+               ylim  = c(0, 1),
+               ylab  = "Proportion",
+               main  = "Overall Yes/No (ZBINARY_Y_N)")
+
+text(bp1, cumsum(mat_bin) - mat_bin/2,
+     labels = paste0(rownames(mat_bin), " (", round(100*mat_bin, 1), "%)"),
+     cex = 2)
+
+## Right: 100% stacked tag distribution (colored, with legend)
+bp2 <- barplot(mat_tag,
+               col   = cols_tag_use,
+               ylim  = c(0, 1),
+               ylab  = "Proportion",
+               main  = "Overall tag distribution")
+
+# optional text labels inside segments:
+text(bp2, cumsum(mat_tag) - mat_tag/2, labels = round(100*mat_tag, 1), cex = 1.6)
+legend("topright",
+       legend = rownames(mat_tag),
+       fill   = cols_tag_use,
+       title  = "Tags",
+       cex    = 2, bty = "n")
+#TODO: remove the legend and add manually overlaid
+par(op)
+
+
+
+
+#TODO: MORAL QUESTIONS
+#if pfas were detected... continue fishing? sell? consume?
+#within these questions - sankey diagram? 3d concord? idk
+#"If_PFAS_were_detected_in_your_fishing_area_would_you_continue_fishing_in_the_area_", 
+#"If_PFAS_were_detected_in_your_fishing_area_would_you_still_consume_the_lobster_", 
+#"If_PFAS_were_detected_in_your_fishing_area_would_you_still_sell_the_lobster_", 
+#"If_PFAS_were_detected_in_your_fishing_area_would_you_fish_in_a_new_area_", 
+#"If_PFAS_were_detected_in_your_fishing_area_would_you__seek_compensation_or_support_", 
+#"If_PFAS_were_detected_in_your_fishing_area_would_you__lobby_management_to_clean_up_the_source_", 
+#"If_PFAS_were_detected_in_your_fishing_area_would_you__leave_the_fishery_", 
+unique(d$If_PFAS_were_detected_in_your_fishing_area_would_you_continue_fishing_in_the_area_)
+unique(d$If_PFAS_were_detected_in_your_fishing_area_would_you_still_consume_the_lobster_)
+unique(d$If_PFAS_were_detected_in_your_fishing_area_would_you_still_sell_the_lobster_)
+unique(d$If_PFAS_were_detected_in_your_fishing_area_would_you_fish_in_a_new_area_)
+unique(d$If_PFAS_were_detected_in_your_fishing_area_would_you__seek_compensation_or_support_)
+unique(d$If_PFAS_were_detected_in_your_fishing_area_would_you__lobby_management_to_clean_up_the_source_)
+
+
+## Common levels, ordered
+lvl <- c("not likely", "somewhat likely", "very likely")
+## 1) Recode each question as an ordered factor with these levels ----
+cont_fish <- factor(trimws(
+  d$If_PFAS_were_detected_in_your_fishing_area_would_you_continue_fishing_in_the_area_
+), levels = lvl, ordered = TRUE)
+
+cons_lob  <- factor(trimws(
+  d$If_PFAS_were_detected_in_your_fishing_area_would_you_still_consume_the_lobster_
+), levels = lvl, ordered = TRUE)
+
+sell_lob  <- factor(trimws(
+  d$If_PFAS_were_detected_in_your_fishing_area_would_you_still_sell_the_lobster_
+), levels = lvl, ordered = TRUE)
+
+fish_new  <- factor(trimws(
+  d$If_PFAS_were_detected_in_your_fishing_area_would_you_fish_in_a_new_area_
+), levels = lvl, ordered = TRUE)
+
+seek_comp <- factor(trimws(
+  d$If_PFAS_were_detected_in_your_fishing_area_would_you__seek_compensation_or_support_
+), levels = lvl, ordered = TRUE)
+
+lobby_mgmt <- factor(trimws(
+  d$If_PFAS_were_detected_in_your_fishing_area_would_you__lobby_management_to_clean_up_the_source_
+), levels = lvl, ordered = TRUE)
+
+## 2) Build a list for convenience ----
+qs <- list(
+  Continue = cont_fish,
+  Consume  = cons_lob,
+  Sell     = sell_lob,
+  NewArea  = fish_new,
+  SeekComp = seek_comp,
+  Lobby    = lobby_mgmt
+)
+
+## 3) 3 (levels) × 6 (questions) matrix of column-wise proportions ----
+mat <- sapply(qs, function(v) {
+  prop.table(table(factor(v, levels = lvl), useNA = "no"))
+})
+rownames(mat) <- lvl
+mat
+
+
+## Colors: not likely = red, somewhat = gold, very likely = green
+cols <- c("not likely"      = "firebrick2",
+          "somewhat likely" = "goldenrod2",
+          "very likely"     = "forestgreen")
+par(mfrow = c(1, 1))     
+bp <- barplot(mat,
+              col    = cols[rownames(mat)],
+              ylim   = c(0, 1),
+              ylab   = "Proportion of responses",
+              xlab   = "Question",
+              main   = "PFAS response patterns across actions",
+              las    = 1)
+legend("topright",
+       legend = rownames(mat),
+       fill   = cols[rownames(mat)],
+       title  = "Response",
+       cex    = 0.9, bty = "n")
+
+
+## 2D contingency table: rows = Continue, cols = Sell
+tab_fish_sell <- table(cons_lob, sell_lob, useNA = "no")
+tab_fish_sell
+
+## Mosaic plot (shows joint distribution)
+mosaicplot(tab_fish_sell,
+           color = c("firebrick2", "goldenrod2", "forestgreen"),
+           main  = "Continue fishing vs Still sell lobster (PFAS detected)",
+           xlab  = "Likelihood of consuming",
+           ylab  = "Likelihood of still selling lobster",
+           las   = 1)
+
+lvl <- c("not likely", "somewhat likely", "very likely")
+
+cons_lob  <- factor(trimws(
+  d$If_PFAS_were_detected_in_your_fishing_area_would_you_still_consume_the_lobster_
+), levels = lvl, ordered = TRUE)
+
+sell_lob  <- factor(trimws(
+  d$If_PFAS_were_detected_in_your_fishing_area_would_you_still_sell_the_lobster_
+), levels = lvl, ordered = TRUE)
+tab_cs <- table(cons_lob, sell_lob, useNA = "no")
+tab_cs
+#install.packages("networkD3")  # run once if needed
+library(networkD3)
+
+## Nodes: consume levels (left) + sell levels (right)
+nodes <- data.frame(
+  name = c(paste0("Sell: ", lvl),
+           paste0("Consume: ", lvl))
+)
+
+links_list <- list()
+for (i in seq_along(lvl)) {        # sell row
+  for (j in seq_along(lvl)) {      # consume col
+    n_ij <- tab_cs[lvl[j], lvl[i]]  # NOTE: swapped indexing!
+    if (n_ij > 0) {
+      src <- i - 1                       # sell indices: 0,1,2
+      tgt <- length(lvl) + j - 1         # consume indices offset by 3
+      links_list[[length(links_list) + 1]] <- data.frame(
+        source = src,
+        target = tgt,
+        value  = as.numeric(n_ij)
+      )
+    }
+  }
+}
+links <- do.call(rbind, links_list)
+sankeyNetwork(Links = links,
+              Nodes = nodes,
+              Source = "source",
+              Target = "target",
+              Value  = "value",
+              NodeID = "name",
+              fontSize = 14,
+              nodeWidth = 30)
+library(networkD3)
+
+## 1) Base levels for the variables (for factors / tabulation)
+lvl <- c("not likely", "somewhat likely", "very likely")
+cons_lob <- factor(trimws(
+  d$If_PFAS_were_detected_in_your_fishing_area_would_you_still_consume_the_lobster_
+), levels = lvl, ordered = TRUE)
+sell_lob <- factor(trimws(
+  d$If_PFAS_were_detected_in_your_fishing_area_would_you_still_sell_the_lobster_
+), levels = lvl, ordered = TRUE)
+tab_cs <- table(cons_lob, sell_lob, useNA = "no")
+## 2) Plot order for vertical stacking: top → bottom
+lvl_plot <- c("very likely", "somewhat likely", "not likely")
+## 3) Nodes: SELL (left) then CONSUME (right), in lvl_plot order
+nodes <- data.frame(
+  name = c(paste0("Sell: ",    lvl_plot),
+           paste0("Consume: ", lvl_plot))
+)
+## 4) Links: source = SELL, target = CONSUME, using lvl_plot order
+links_list <- list()
+for (i in seq_along(lvl_plot)) {        # sell (left)
+  for (j in seq_along(lvl_plot)) {      # consume (right)
+    n_ij <- tab_cs[lvl_plot[j], lvl_plot[i]]  # (row=consume, col=sell)
+    if (n_ij > 0) {
+      src <- i - 1                         # sell indices: 0,1,2
+      tgt <- length(lvl_plot) + j - 1      # consume indices: 3,4,5
+      links_list[[length(links_list) + 1]] <- data.frame(
+        source = src,
+        target = tgt,
+        value  = as.numeric(n_ij)
+      )
+    }
+  }
+}
+links <- do.call(rbind, links_list)
+## 5) Sankey with fixed ordering (iterations=0 prevents reshuffling)
+sankeyNetwork(Links = links,
+              Nodes = nodes,
+              Source = "source",
+              Target = "target",
+              Value  = "value",
+              NodeID = "name",
+              fontSize = 14,
+              nodeWidth = 30,
+              iterations = 0)
+
+
+
+#TODO: binarize - to simplify for presy - maybe combine somewhat+not likely
+## Binarize: not/somewhat vs very likely
+recode_bin <- function(x) {
+  x <- as.character(x)
+  ifelse(is.na(x), NA,
+         ifelse(x == "very likely", "very likely", "not/somewhat"))
+}
+
+cons_bin <- factor(recode_bin(cons_lob),
+                   levels = c("not/somewhat", "very likely"),
+                   ordered = TRUE)
+
+sell_bin <- factor(recode_bin(sell_lob),
+                   levels = c("not/somewhat", "very likely"),
+                   ordered = TRUE)
+tab_cs_bin <- table(cons_bin, sell_bin, useNA = "no")
+tab_cs_bin
+library(networkD3)
+## vertical order top → bottom: very likely, then not/somewhat
+lvl_bin_plot <- c("very likely", "not/somewhat")
+
+## Nodes: SELL left, CONSUME right
+nodes <- data.frame(
+  name = c(paste0("Sell: ",    lvl_bin_plot),
+           paste0("Consume: ", lvl_bin_plot))
+)
+
+## Links
+links_list <- list()
+for (i in seq_along(lvl_bin_plot)) {        # sell (left)
+  for (j in seq_along(lvl_bin_plot)) {      # consume (right)
+    n_ij <- tab_cs_bin[lvl_bin_plot[j], lvl_bin_plot[i]]
+    if (!is.na(n_ij) && n_ij > 0) {
+      src <- i - 1                          # 0,1
+      tgt <- length(lvl_bin_plot) + j - 1   # 2,3
+      links_list[[length(links_list) + 1]] <- data.frame(
+        source = src,
+        target = tgt,
+        value  = as.numeric(n_ij)
+      )
+    }
+  }
+}
+links <- do.call(rbind, links_list)
+
+## Sankey
+sankeyNetwork(Links = links,
+              Nodes = nodes,
+              Source = "source",
+              Target = "target",
+              Value  = "value",
+              NodeID = "name",
+              fontSize = 14,
+              nodeWidth = 30,
+              iterations = 0)
+
+
+
+
+#compare fish in new area vs ease of establish new territory
+#How easy would it be to establish a new fishing territory?
+#fish_new  <- factor(trimws(
+#  d$If_PFAS_were_detected_in_your_fishing_area_would_you_fish_in_a_new_area_
+#), levels = lvl, ordered = TRUE)
+unique(d$How_easy_would_it_be_to_establish_a_new_fishing_territory_)
+lvl_new <- c("not likely", "somewhat likely", "very likely")
+
+fish_new <- factor(trimws(
+  d$If_PFAS_were_detected_in_your_fishing_area_would_you_fish_in_a_new_area_
+), levels = lvl_new, ordered = TRUE)
+
+## Ease of establishing a new territory
+ease <- factor(trimws(
+  d$How_easy_would_it_be_to_establish_a_new_fishing_territory_
+), levels = c("Not possible","Possible","Very easy"), ordered = TRUE)
+
+fish_new_score <- as.integer(fish_new) - 1L  # not=0, somewhat=1, very=2
+
+ok <- is.finite(fish_new_score) & !is.na(ease)
+boxplot(fish_new_score[ok] ~ ease[ok],
+        xlab = "Ease of establishing a new territory",
+        ylab = "Likely to fish in new area (0=not,1=somewhat,2=very)",
+        main = "Likelihood of fishing in new area vs ease")
+set.seed(42)
+xnum <- as.numeric(ease[ok])
+points(jitter(xnum, 0.15), fish_new_score[ok],
+       pch = 16, cex = 2.9, col = adjustcolor("black", 0.4))
+## Nonparametric test across the three ease levels
+suppressWarnings(print(kruskal.test(fish_new_score[ok] ~ ease[ok])))
+
+tab_fe <- table(ease, fish_new, useNA = "no")
+prop_fe <- prop.table(tab_fe, margin = 1)  # within-ease proportions
+cols_new <- c("not likely"      = "firebrick2",
+              "somewhat likely" = "goldenrod2",
+              "very likely"     = "forestgreen")
+bp <- barplot(t(prop_fe),
+              beside = FALSE,
+              col    = cols_new[colnames(prop_fe)],
+              ylim   = c(0, 1),
+              ylab   = "Proportion within ease category",
+              xlab   = "Ease of establishing a new territory",
+              main   = "Likelihood of fishing in new area by ease",
+              las    = 1)
+legend("topright",
+       legend = colnames(prop_fe),
+       fill   = cols_new[colnames(prop_fe)],
+       title  = "Fish in new area",
+       cex    = 0.9, bty = "n")
+
+
+#and sankey: 
+# install.packages("networkD3") # if not installed
+library(networkD3)
+
+## contingency
+tab_fe2 <- table(ease, fish_new, useNA = "no")
+
+## display order (top → bottom) for nodes
+lvl_ease_plot <- c("Very easy","Possible","Not possible")
+lvl_new_plot  <- c("very likely","somewhat likely","not likely")
+
+nodes <- data.frame(
+  name = c(paste0("Ease: ", lvl_ease_plot),
+           paste0("NewArea: ", lvl_new_plot))
+)
+
+links_list <- list()
+for (i in seq_along(lvl_ease_plot)) {      # ease (left)
+  for (j in seq_along(lvl_new_plot)) {     # fish_new (right)
+    n_ij <- tab_fe2[lvl_ease_plot[i], lvl_new_plot[j]]
+    if (n_ij > 0) {
+      src <- i - 1                         # ease indices
+      tgt <- length(lvl_ease_plot) + j - 1 # fish_new indices
+      links_list[[length(links_list) + 1]] <- data.frame(
+        source = src,
+        target = tgt,
+        value  = as.numeric(n_ij)
+      )
+    }
+  }
+}
+links <- do.call(rbind, links_list)
+
+sankeyNetwork(Links = links,
+              Nodes = nodes,
+              Source = "source",
+              Target = "target",
+              Value  = "value",
+              NodeID = "name",
+              fontSize = 14,
+              nodeWidth = 30,
+              iterations = 0)
+
+
+
+
+```
