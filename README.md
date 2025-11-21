@@ -3,30 +3,23 @@
 ## 1. Project Overview
 
 This repository contains the full data wrangling and analysis pipeline for a survey of lobster fishery stakeholders’ perceptions of PFAS contamination and other fisheries-related issues.
-
-Documentation and code are intended to be **fully reproducible** so that someone who has never worked with these data before can:
-
 1. Obtain the raw data (or understand its structure and origin),
 2. Recreate the cleaned dataset, and
 3. Reproduce all analyses and visualizations, including the ranking analysis of perceived concerns.
 
-This repo supports open and transparent science by:
-
-- Clearly documenting data provenance and cleaning steps,
-- Providing fully runnable code (R Markdown and R scripts),
-- Explicitly describing how missing data and partial rankings are handled, and
-- Making all modeling decisions and visualizations reproducible.
-
+- Data provenance and cleaning steps
+- See fully runnable code (R Markdown and R scripts)
+- How missing data and partial rankings are handled
+- All modeling decisions and visualizations are reproducible
 ---
-
 ## 2. Data Source & Provenance
 
 ### 2.1 Original Data Collection
 
 - **Instrument:** Google Forms survey
-- **Population:** Lobster fishery stakeholders (e.g., harvesters) in Maine
-- **Mode:** Online self-administered survey
-- **Output format:** Google Forms → exported as CSV
+- **Population:** Lobster fishery stakeholders "Lobstermen" in Maine
+- **Mode:** Online self-administered survey with in-person extra notes and conversations recorded as supplementary longform interview notes
+- **Output format:** Google Forms, exported as CSV from app.
 
 The raw Google Forms export includes:
 
@@ -40,8 +33,8 @@ The raw Google Forms export includes:
 ### 2.2 Original Raw File
 
 - **File type:** CSV exported from Google Forms
-- **Original filename:** `INSERT_RAW_FILENAME_HERE.csv`
-- **Storage location:** Documented in this repo under `data/raw/` (or described here if not shared directly for privacy reasons).
+- **Original filename:** `JED_cleaned_LobstermenResponses.csv`
+- **Storage location:** Local folder (small file), accessible on desktop by VSCODE.
 
 ---
 
