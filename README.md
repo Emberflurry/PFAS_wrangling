@@ -480,7 +480,7 @@ HDBSCAN clusters the UMAP embeddings into topics (with one cluster -1 reserved f
 UMAP/HDBSCAN hyperparameters follow Dr. Bobak’s example code with minor tuning (e.g., neighborhood size and minimum cluster size) to produce a small number of interpretable clusters; exact values are recorded in the notebook.
 
 3. BERTopic Model:
-4. ```excel
+ ```excel
 from umap import UMAP
 from hdbscan import HDBSCAN
 from bertopic import BERTopic
