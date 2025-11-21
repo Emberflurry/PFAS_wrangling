@@ -16,8 +16,8 @@ This repository contains the full data wrangling and analysis pipeline for a sur
 
 ### 2.1 Original Data Collection
 
-- **Instrument:** Google Forms survey
-- **Population:** Lobster fishery stakeholders "Lobstermen" in Maine
+- **Instrument:** Google Forms survey, Google Docs with longform text interview transcriptions
+- **Population:** Lobster fishery stakeholders "Lobstermen" in Maine, n=34 at time of project.
 - **Mode:** Online self-administered survey with in-person extra notes and conversations recorded as supplementary longform interview notes
 - **Output format:** Google Forms, exported as CSV from app.
 
@@ -52,6 +52,7 @@ We used Excel for preliminary cleaning of the Google Forms CSV before moving int
   - Renamed long auto-generated question labels to more concise variable names where needed.
 - [ ] **Basic data cleaning**
   - Removed test responses / incomplete pilot responses (Grady Welsh, for some questions, including rankings).
+  - Several entries were marked as Gender: Female when all interviewees were Male (simple manual conversion to Male)
   - Fixed obvious text inconsistencies (ie Zone 6 is really Zone F, to standardized format).
 - [ ] **Recoding / derived variables**
   - Created binary or categorical variables (e.g., Yes/No awareness, age groupings, etc.).
