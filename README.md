@@ -22,11 +22,11 @@ This repository contains the full data wrangling and analysis pipeline for a sur
 - **Output format:** Google Forms, exported as CSV from app.
 
 The raw Google Forms export includes:
-
+(see more detail in 3: Excel-based cleaning)
 - Timestamp / response metadata
-- Demographics
-- Fishing zone information
-- Knowledge/awareness questions (e.g., PFAS awareness)
+- Demographics: Gender, age, Town
+- Fishing zone information (A-G)
+- Knowledge/awareness questions (Pollution, PFAS awareness)
 - Attitudinal questions
 - **Issue ranking questions** (the 6–7 issues that are analyzed in `ranking1.Rmd`)
 
@@ -35,7 +35,6 @@ The raw Google Forms export includes:
 - **File type:** CSV exported from Google Forms
 - **Original filename:** `JED_cleaned_LobstermenResponses.csv`
 - **Storage location:** Local folder (small file), accessible on desktop by VSCODE.
-
 ---
 
 ## 3. Manual / Excel-Based Cleaning (Preliminary Wrangling)
@@ -52,28 +51,216 @@ We used Excel for preliminary cleaning of the Google Forms CSV before moving int
 - [ ] **Column renaming / re-ordering**
   - Renamed long auto-generated question labels to more concise variable names where needed.
 - [ ] **Basic data cleaning**
-  - Removed test responses / incomplete pilot responses (if any).
-  - Fixed obvious text inconsistencies (e.g., `"Zone F, Zone G"` to standardized format).
+  - Removed test responses / incomplete pilot responses (Grady Welsh, for some questions, including rankings).
+  - Fixed obvious text inconsistencies (ie Zone 6 is really Zone F, to standardized format).
 - [ ] **Recoding / derived variables**
   - Created binary or categorical variables (e.g., Yes/No awareness, age groupings, etc.).
   - Marked or coded missing values consistently.
+**Pollution awareness & PFAS knowledge**
+- As a lobsterman, are you concerned about pollution? If yes, what types of pollution concern you most?  
+- Are you aware of any sources of pollution near your fishing grounds?  
+- Have you previously heard of PFAS (“forever chemicals”)?  
+- Do you know if PFAS is an issue in Maine?  
+- When you think about pollution in fisheries, do you think about PFAS as a pollutant?  
+- Do you know if PFAS have been detected in lobsters?  
+- Have you heard any news, research, or state communications about PFAS in lobsters?  
+- If yes, what source/info?  
+- Are you aware of human-health risks associated with PFAS exposure?  
+- Do you know anyone impacted by PFAS?  
+
+**Concern questions**
+- How concerned are you about PFAS contamination in lobsters?  
+- How concerned are you about PFAS negatively affecting lobster health?  
+- Do you think PFAS could pose a health risk to consumers?  
+- Do you think consumers would eat less lobster if PFAS were present?  
+- Do you think PFAS exposure decreases lobster populations?  
+- How concerned are you about PFAS research affecting marketability?  
+
+**Trust & engagement**
+- How much trust do you have in scientists?  
+- What experiences shaped your answer?  
+- Would you like research done to monitor PFAS levels in lobsters?  
+- Would you want to work with scientists (communication, sampling, meetings)?  
+- How involved are you with the co-management system?  
+- In what way are you involved (if applicable)?  
+- How much trust do you have in state agencies?  
+- If PFAS were found in your catch, who would you reach out to for support?  
+- Do you feel you could voice concerns regarding pollution to management?  
+- Explain your answer  
+
+**Behavioral/hypothetical PFAS responses**
+- If PFAS were detected in your fishing area, would you:  
+  - continue fishing?  
+  - consume the lobster?  
+  - sell it?  
+  - fish in a new area?  
+  - seek compensation/support?  
+  - lobby management to clean up?  
+  - leave the fishery?  
+
+**Livelihood**
+- How easy would it be to establish a new fishing territory?  
+- How dependent are you on the fishery?  
+- Importance of passing down the fishery  
+- How PFAS could impact future generations  
+
+**Social dynamics**
+- If some areas were contaminated, how would territoriality/social dynamics change?  
+
+**Ranking task**
+- Rank the following from most to least concerning:  
+  - shifts in lobster habitat  
+  - right whale regulations  
+  - market crashes  
+  - cost of supplies (bait)  
+  - labor costs  
+  - PFAS  
+  - wind farms  
+
+**Open-ended prompts**
+- How the community responds to problems  
+- Past experiences stopping lobstering  
+- Referral for additional interviews  
+
+---
+
+## 2. Core Cleaning & Standardization Steps
+
+### 2.1 Lobster Zone Normalization
+Google-Forms free-text entries (“Zone 6”, “6”, “F”, etc.) were standardized into a consistent zone coding system  
+(e.g., **Zone 6 → Zone F**).
+
+---
+
+## 3. Pollution Concern Variable (Q1) Cleaning
+
+The column  
+**“As a lobsterman, are you concerned about pollution? If yes, what types…?”**  
+contained comma-separated free text with inconsistent casing, spacing, and synonyms.
+
+### 3.1 Automated normalization formula
+A canonical list of “base” pollution categories was defined:
+No
+Mercury
+Microplastics
+PFAS
+Sewage/wastewater treatment discharge
+Industrial discharges
+Pesticides and herbicides
+Fertilizers
+Oil/fuel spills
+Trash/marine litter
+CO2 / ocean acidification
+Thermal pollution
+
+Excel formula used to standardize and extract non-typical items:
+
+```excel
+=LET(
+  norm, LAMBDA(s, LOWER(TRIM(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(s,CHAR(160)," "),", ",",")," ,",","),",  ",",")))),
+
+  txt_norm, norm(K2),
+  hay, "," & txt_norm & ",",
+
+  base, {"No";"Mercury";"Microplastics";"PFAS";"Sewage/wastewater treatment discharge";"Industrial discharges (mills, factories, shipyards etc.)";"Pesticides and herbicides";"Fertilizers";"Oil/fuel spills";"Trash/marine litter";"CO2, which causes ocean acidification";"Thermal pollution"},
+  base_norm, MAP(base, LAMBDA(b, norm(b))),
+
+  pruned, REDUCE(hay, base_norm, LAMBDA(acc,term, SUBSTITUTE(acc, ","&term&",", ","))),
+  cleaned, MID(pruned, 2, LEN(pruned)-2),
+
+  items, FILTER(TEXTSPLIT(cleaned, ","), TEXTSPLIT(cleaned, ",")<>""),
+
+  TEXTJOIN(", ", TRUE, items)
+)
+
+3.2 Cross-question subtraction (Q1 − Q2)
+
+To remove overlaps with pollution sources listed in the next question:
+=LET(
+  k, IFERROR(TEXTSPLIT(K2, ","), ""),
+  l, IFERROR(TEXTSPLIT(L2, ","), ""),
+  kT, TRIM(k),
+  lT, TRIM(l),
+  keep, FILTER(kT, ISNA(XMATCH(kT, lT))),
+
+  IF(ROWS(keep)=0, "", TEXTJOIN(", ", TRUE, keep))
+)
+
+3.3 Merging Fields
+=IF(ISBLANK([@Column1]),[@Column2],CONCAT([@Column2],", ",[@Column1]))
+Final merged column = Final Q1.
+
+
+4. Pollution Source (Q2) Cleaning
+Base categories:
+military bases
+fire stations
+wastewater treatment plants
+general runoff (fertilizers, pesticides, herbicides etc)
+Same normalization → prune → extract-nonbase workflow as in Q1.
+Recombination:
+=IF(ISBLANK([@Column4]),[@Column5],CONCAT([@Column5],", ",[@Column4]))
+
+5. Binary Variables Created
+| New variable                      | Original question                                | Excel rule                                                                                                                                            |
+| --------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **PFAS_issue_in_Maine_BINARY**    | Do you know if PFAS is an issue in Maine?        | `=IF([@[Do you know…]]="No","No","Yes")`                                                                                                              |
+| **Know_someone_impacted_BINARY**  | Do you know anyone impacted by PFAS?             | `=IF([@[Do you know anyone…]]="No","No","Yes")`                                                                                                       |
+| **Willing_to_communicate_BINARY** | Scientist-involvement question                   | `=IF(TEXTBEFORE([@[Would you want to work with scientists…]],",")="Would you want to further communicate with scientists on this topic?","Yes","No")` |
+| **Had_to_stop_lobstering_BINARY** | Derived from long-form past-experience responses | Manual                                                                                                                                                |
+
+6. Manually Interpreted Variables
+These required contextual reading and could not be automated reliably:
+
+6.1 Support categories
+
+From: “If PFAS were found in your catch, who would you reach out to?”
+Coded into:
+
+Private associations
+
+State agencies
+
+Scientists
+
+No one
+
+Other
+
+6.2 Community-response classification
+
+Y/N + qualitative reasoning extracted from:
+“Would PFAS be dealt with the same way as other fishery problems?”
+
+6.3 Topic extraction
+
+Two exploratory variables:
+
+Importance factors mentioned/implied
+
+Other factors/categories
+
+Generated through light topic modeling / word grouping.
+Not used in final analysis due to vagueness.
+
+6.4 Stopping-lobstering experiences
+
+Had to stop (Y/N)
+
+Reason category (e.g., right whale regulations, warming waters, gear rules, oil spills)
+
 - [ ] **Saving cleaned data**
   - Saved the cleaned Excel file as  
     `JED_cleaned_LobstermenResponses.xlsx`  
     placed in a local project folder (and documented here).
 
-> **Note:** Be explicit here about:
-> - Which columns were dropped or kept,
-> - Any manual recodes,
-> - How missing or “Prefer not to answer” responses were treated.
 
-## R Processing/Categorical and Continuous Visualizations
-# 🔍 Survey Cleaning + Analysis Pipeline
+
+### R Processing/Categorical and Continuous Visualizations
+#Survey Cleaning + Analysis Pipeline
 
 Below is a detailed, step-by-step documentation of the full data-cleaning and statistical analysis pipeline used in this project. This section corresponds to the R code contained in the main analysis script and allows full replication of the workflow.
-
 ---
-
 ## 1. Loading + Pre-processing the Raw CSV
 
 - Import the raw Google-Forms-derived CSV using `read.csv(check.names = FALSE)` to avoid automatic name mangling.
@@ -90,18 +277,14 @@ Below is a detailed, step-by-step documentation of the full data-cleaning and st
 ## 2. Extracting and Harmonizing Binary Yes/No Variables
 
 - Google Forms outputs Yes/No fields inconsistently (`"Yes"`, `"yes"`, `"Y"`, `"1"`, etc.).
-- All such fields are standardized using:
-
+- For safety (I don't trust myself sometimes and am lazy to check), All such fields are standardized using:
   - **YES** → `"yes"`, `"y"`, `"true"`, `"1"`
   - **NO** → `"no"`, `"n"`, `"false"`, `"0"`
   - Everything else → `NA`
-
 - Produces clean and consistent binary factors used in:
-  - Fisher’s Exact Tests  
-  - McNemar’s Test  
+  - Fisher’s Exact Tests   
   - Logistic regression  
   - Proportion plots  
-
 ---
 
 ## 3. Handling Multi-Zone Lobster Fishing Areas
