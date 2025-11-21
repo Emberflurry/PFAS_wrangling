@@ -172,10 +172,11 @@ Excel formula used to standardize and extract non-typical items:
 
   TEXTJOIN(", ", TRUE, items)
 )
-
+```
 3.2 Cross-question subtraction (Q1 − Q2)
 
 To remove overlaps with pollution sources listed in the next question:
+```excel
 =LET(
   k, IFERROR(TEXTSPLIT(K2, ","), ""),
   l, IFERROR(TEXTSPLIT(L2, ","), ""),
@@ -185,9 +186,11 @@ To remove overlaps with pollution sources listed in the next question:
 
   IF(ROWS(keep)=0, "", TEXTJOIN(", ", TRUE, keep))
 )
-
+```
 3.3 Merging Fields
+```excel
 =IF(ISBLANK([@Column1]),[@Column2],CONCAT([@Column2],", ",[@Column1]))
+```
 Final merged column = Final Q1.
 
 
@@ -199,9 +202,11 @@ wastewater treatment plants
 general runoff (fertilizers, pesticides, herbicides etc)
 Same normalization → prune → extract-nonbase workflow as in Q1.
 Recombination:
+```excel
 =IF(ISBLANK([@Column4]),[@Column5],CONCAT([@Column5],", ",[@Column4]))
+```
 
-5. Binary Variables Created
+6. Binary Variables Created
 | New variable                      | Original question                                | Excel rule                                                                                                                                            |
 | --------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **PFAS_issue_in_Maine_BINARY**    | Do you know if PFAS is an issue in Maine?        | `=IF([@[Do you know…]]="No","No","Yes")`                                                                                                              |
@@ -218,13 +223,9 @@ From: “If PFAS were found in your catch, who would you reach out to?”
 Coded into:
 
 Private associations
-
 State agencies
-
 Scientists
-
 No one
-
 Other
 
 6.2 Community-response classification
