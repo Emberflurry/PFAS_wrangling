@@ -3,14 +3,15 @@
 ## 1. Project Overview
 
 This repository contains the full data wrangling and analysis pipeline for a survey of lobster fishery stakeholders’ perceptions of PFAS contamination and other fisheries-related issues.
-1. Obtain the raw data (or understand its structure and origin),
-2. Recreate the cleaned dataset, and
-3. Reproduce all analyses and visualizations, including the ranking analysis of perceived concerns.
+1. Obtain the raw data in the above repository files,
+2. Recreate the cleaned dataset if you want, and
+3. Reproduce all analyses and visualizations, including the categorical comparisons, regressions, ranking analysis of perceived concerns, and attempted topic modelling and sentiment analysis. Many more exploratory analyses were conducted and not included for brevity here - most variable correlations were deemed uninteresting given the low power and mixed results of comparisons, and also the domain knowledge that (mostly Phoebe) had about how the questions were answered and what kind of history drove some of the lobstermen's opinions.
 
+To follow:
 - Data provenance and cleaning steps
 - See fully runnable code (R Markdown and R scripts)
 - How missing data and partial rankings are handled
-- All modeling decisions and visualizations are reproducible
+- In theory all modeling decisions and visualizations are reproducible
 ---
 ## 2. Data Source & Provenance
 
@@ -174,7 +175,8 @@ Excel formula used to standardize and extract non-typical items:
   TEXTJOIN(", ", TRUE, items)
 )
 ```
-3.2 Cross-question subtraction (Q1 − Q2)
+
+# 3.2 Cross-question subtraction (Q1 − Q2)
 
 To remove overlaps with pollution sources listed in the next question:
 ```excel
@@ -188,14 +190,14 @@ To remove overlaps with pollution sources listed in the next question:
   IF(ROWS(keep)=0, "", TEXTJOIN(", ", TRUE, keep))
 )
 ```
-3.3 Merging Fields
+# 3.3 Merging Fields
 ```excel
 =IF(ISBLANK([@Column1]),[@Column2],CONCAT([@Column2],", ",[@Column1]))
 ```
 Final merged column = Final Q1.
 
 
-4. Pollution Source (Q2) Cleaning
+# 4. Pollution Source (Q2) Cleaning
 Base categories:
 military bases
 fire stations
@@ -207,7 +209,7 @@ Recombination:
 =IF(ISBLANK([@Column4]),[@Column5],CONCAT([@Column5],", ",[@Column4]))
 ```
 
-6. Binary Variables Created
+# 6. Binary Variables Created
 | New variable                      | Original question                                | Excel rule                                                                                                                                            |
 | --------------------------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **PFAS_issue_in_Maine_BINARY**    | Do you know if PFAS is an issue in Maine?        | `=IF([@[Do you know…]]="No","No","Yes")`                                                                                                              |
@@ -215,7 +217,7 @@ Recombination:
 | **Willing_to_communicate_BINARY** | Scientist-involvement question                   | `=IF(TEXTBEFORE([@[Would you want to work with scientists…]],",")="Would you want to further communicate with scientists on this topic?","Yes","No")` |
 | **Had_to_stop_lobstering_BINARY** | Derived from long-form past-experience responses | Manual                                                                                                                                                |
 
-6. Manually Interpreted Variables
+# 6. Manually Interpreted Variables
 These required contextual reading and could not be automated reliably:
 
 6.1 Support categories
@@ -259,9 +261,10 @@ Reason category (e.g., right whale regulations, warming waters, gear rules, oil 
 
 
 ### R Processing/Categorical and Continuous Visualizations
+(scroll further for python topic modelling)
 #Survey Cleaning + Analysis Pipeline
 
-Below is a detailed, step-by-step documentation of the full data-cleaning and statistical analysis pipeline used in this project. This section corresponds to the R code contained in the main analysis script and allows full replication of the workflow.
+Below is a detailed, step-by-step documentation of the full data-cleaning and statistical analysis pipeline, including most of the R-generated visuals in the project presentation given.
 ---
 ## 1. Loading + Pre-processing the Raw CSV
 
@@ -297,6 +300,7 @@ Below is a detailed, step-by-step documentation of the full data-cleaning and st
   2. Splits into multiple rows with `separate_rows()`
   3. Trims whitespace and removes empty zones
 - Creates a long-format dataset: **one (respondent × zone) row per zone**, enabling zone-level analyses.
+- Most Zone-level analyses were not used in the report due to low survey counts in many regions (almost all were in low/mid-coast zones and early visuals did not find any significant differences between the two/three).
 - Zone sample sizes are computed and used to annotate graphs.
 
 ---
@@ -315,7 +319,8 @@ Below is a detailed, step-by-step documentation of the full data-cleaning and st
 
 - Free-text “Reconcat” responses listing pollution sources are:
   - split on commas,
-  - counted into `source_count`,
+  - counted into `source_count`-> ordinal/numeric count of named sources (reference is all are sources, so really a question of how many sources people were aware of - naming all/some is meaningful and not-open ended. Essentially a test of knowledge.
+  - for later by-age Awareness comparisons and other variables, these 0-6 counts were kept as well in addition to the binarized version.
   - treated as **0** when the user explicitly answered “No”.
 - Builds:
   - a binary variable for “listed any source”
@@ -341,7 +346,7 @@ This checks internal consistency between two different awareness questions.
 
 ## 7. Ordinal Scoring for Concern/Intensity Questions
 
-Several Likert-type items are recoded to ordinal numeric scales:
+Several Likert-type items are produced from named/selected categories to ordinal numeric scales:
 
 | Response              | Score |
 |----------------------|--------|
@@ -440,10 +445,9 @@ This captures variation in coping strategies among groups experiencing disruptio
 
 ---
 
-## 12. Exploratory Topic Modelling (attempt, haha).
+### 12. Exploratory Topic Modelling (attempt, haha).
 
-
-### 1. Data Source for Text Analysis
+## 1. Data Source for Text Analysis
 
 Topic modeling focuses on long-form, open-ended responses, in particular:
 from the supplementary interview transcriptions/assistant notes from some of the interviews,
