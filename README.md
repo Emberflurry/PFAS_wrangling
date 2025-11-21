@@ -75,280 +75,224 @@ We used Excel for preliminary cleaning of the Google Forms CSV before moving int
 > - How missing or “Prefer not to answer” responses were treated.
 
 ## R Processing/Categorical and Continuous Visualizations
-1. Loading + Pre-processing the Raw CSV
-Goals
+# 🔍 Survey Cleaning + Analysis Pipeline
 
-Read the Google-Forms-derived CSV (lobster_clean2.csv)
+Below is a detailed, step-by-step documentation of the full data-cleaning and statistical analysis pipeline used in this project. This section corresponds to the R code contained in the main analysis script and allows full replication of the workflow.
 
-Standardize and sanitize non-machine-friendly column names
+---
 
-Fix missing names, duplicate names, and punctuation issues
+## 1. Loading + Pre-processing the Raw CSV
 
-Recover specific key survey fields reliably, even after name sanitation
+- Import the raw Google-Forms-derived CSV using `read.csv(check.names = FALSE)` to avoid automatic name mangling.
+- Sanitize column names by removing:
+  - tabs, punctuation, parentheses, slashes, question marks, and repeated underscores.
+- Detect and repair:
+  - blank column names → assigned placeholders (`V1`, `V2`, …),
+  - duplicate names → resolved with `make.unique()`.
+- Important survey fields are identified using robust `grep()` patterns, ensuring correct mapping even after header cleaning.
+- Output: a stable, machine-friendly dataset ready for extraction/recoding.
 
-Key Steps
+---
 
-read.csv(check.names = FALSE) prevents R from auto-mangling names.
+## 2. Extracting and Harmonizing Binary Yes/No Variables
 
-Multiple gsub() passes remove tabs, punctuation, slashes, parentheses, question marks, and collapse repeated underscores.
+- Google Forms outputs Yes/No fields inconsistently (`"Yes"`, `"yes"`, `"Y"`, `"1"`, etc.).
+- All such fields are standardized using:
 
-make.unique() ensures no two columns share the same cleaned name.
+  - **YES** → `"yes"`, `"y"`, `"true"`, `"1"`
+  - **NO** → `"no"`, `"n"`, `"false"`, `"0"`
+  - Everything else → `NA`
 
-Specific columns (e.g., Are you aware…?, Lobster Zone) are located using grep() patterns that tolerate trailing _ or punctuation removed during cleaning.
+- Produces clean and consistent binary factors used in:
+  - Fisher’s Exact Tests  
+  - McNemar’s Test  
+  - Logistic regression  
+  - Proportion plots  
 
-Blank or missing names are given placeholder names (V1, V2, …) to preserve column count integrity.
+---
 
-Outcome: the dataset is now header-stable, name-consistent, and safe to reference programmatically.
+## 3. Handling Multi-Zone Lobster Fishing Areas
 
-2. Extracting and Harmonizing Binary Yes/No Variables
+- Respondents often reported multiple zones using commas, “and”, slashes, or ampersands.
+- The pipeline:
+  1. Normalizes `"and"` → `,`
+  2. Splits into multiple rows with `separate_rows()`
+  3. Trims whitespace and removes empty zones
+- Creates a long-format dataset: **one (respondent × zone) row per zone**, enabling zone-level analyses.
+- Zone sample sizes are computed and used to annotate graphs.
 
-Multiple survey questions originally had:
+---
 
-inconsistent capitalization ("Yes", "yes", "Y", "1"…),
+## 4. Awareness by Lobster Zone (Visualization)
 
-TRUE/FALSE-like entries,
+- Computes awareness proportions using zone-normalized denominator.
+- Produces a % stacked bar chart:
+  - `position = "fill"` for within-zone proportions  
+  - X-axis labeled as `Zone (n = count)`  
+- Allows rapid comparison of PFAS human-health-risk awareness across lobster zones.
 
-missing responses ("", NA),
+---
 
-or multi-select answers.
+## 5. Cross-Tabulation: Awareness vs Reconcat (Point-Source Awareness)
 
-The code implements a universal recoding pattern:
+- Free-text “Reconcat” responses listing pollution sources are:
+  - split on commas,
+  - counted into `source_count`,
+  - treated as **0** when the user explicitly answered “No”.
+- Builds:
+  - a binary variable for “listed any source”
+  - a 2×2 table against human-health-risk awareness
+- Produces:
+  - a heatmap of cell counts with row-wise percentages
+  - a contingency table for reporting
 
-case_when(
-  lower %in% c("yes","y","true","1") → "Yes"
-  lower %in% c("no","n","false","0") → "No"
-  else → NA
-)
+This checks internal consistency between two different awareness questions.
 
+---
 
-This yields reproducible binary factors used for crosstabs, McNemar tests, logistic regression, Fisher tests, and Sankey diagrams.
+## 6. Awareness vs Preference for Monitoring Research (McNemar Test)
 
-3. Handling Multi-Zone Responses (Lobster Zone)
+- Converts missing entries in the “monitor PFAS in lobsters” question to `"No"` (conservative).
+- Constructs paired Yes/No variables:
+  - “Aware of PFAS human health risks?”
+  - “Support monitoring PFAS in lobsters?”
+- Runs **McNemar’s test** to detect within-individual discordance.
+- Heatmap visualization displays proportion of respondents in each cell of the 2×2 matrix.
 
-Respondents often listed multiple zones separated by:
+---
 
-commas,
+## 7. Ordinal Scoring for Concern/Intensity Questions
 
-“and”,
+Several Likert-type items are recoded to ordinal numeric scales:
 
-slashes /,
+| Response              | Score |
+|----------------------|--------|
+| Not at all           | 0      |
+| Somewhat             | 1      |
+| Very                 | 2      |
 
-ampersands &.
+Applies to questions on:
+- concern about PFAS,
+- involvement in co-management,
+- dependence on the fishery,
+- ease of establishing a new territory,
+- voicing concerns.
 
-The pipeline:
+Analysis includes:
+- boxplots by age bins,
+- jittered raw points,
+- Kruskal–Wallis tests,
+- Spearman correlations,
+- optional ordinal regression.
 
-Normalizes "and" → ,
+---
 
-Uses separate_rows() to explode multi-zone responses
+## 8. Age-Based Analyses (Core Section)
 
-Trims whitespace
+For each major outcome (awareness, concern, belief, behavior intention), the script performs:
 
-Filters out empty entries
+### **Age (binned, 10-year groups)**
+- Boxplots of response by age bin
+- Jitter overlays
+- Within-bin mean markers
+- Kruskal–Wallis for distributional differences across bins
 
-This produces a long-format dataset: one row per person × per zone, enabling zone-by-zone awareness plots.
+### **Age as continuous**
+- Logistic regression for binary outcomes  
+- Linear regression for ordinal outcomes  
+- Scatter plots with jitter  
+- Regression formula, p-value, and R² annotated directly on plots  
+- Points colored by age group for readability  
 
-A zone frequency table is built to annotate x-axis labels with (n=...) counts.
+This produces consistent age-based diagnostics across all PFAS-related outcomes.
 
-4. Visualization: Awareness by Lobster Zone
+---
 
-A proportionally stacked bar chart is produced:
+## 9. Behavioral Response Scenarios (PFAS Detected)
 
-geom_bar(position = "fill") shows within-zone percentages
+For seven behavioral-intention questions (continue fishing, sell, consume, new area, seek compensation, lobby management, leave fishery):
 
-Y-axis is % aware/unaware
+- Recodes Likert values to ordered factors.
+- Generates:
+  - raw proportion tables,
+  - % stacked bar charts,
+  - binary-collapsed comparisons,
+  - correlation tables,
+  - **Sankey diagrams** showing transitions between action pairs.
 
-X-axis labels include zone and sample size
+Sankeys reveal patterns such as:
+- Sell vs Consume inconsistencies  
+- Compensation vs Lobbying alignments  
+- Movement decisions vs ease-of-new-territory beliefs  
 
-A minimal theme supports publication-ready readability
+Uses fixed `iterations = 0` to guarantee reproducibility.
 
-This is the main “Are you aware of the human-health risks?” zone breakdown.
+---
 
-5. Cross-Tabulation: Awareness vs Reconcat (Point-Source Awareness)
+## 10. Community-Resilience Themes (Free-Text)
 
-The survey included a free-text field “Reconcat” where respondents listed pollution sources.
+- Free-text responses are separated into conceptual tags (strength, apathy, resourcefulness, etc.).
+- Tags are:
+  - comma-separated,
+  - cleaned and normalized,
+  - expanded to long-format,
+  - counted and grouped.
+- Visualization:
+  - 100% stacked bar charts broken down by PFAS-response category
+  - color-coded by conceptual grouping (positive, negative, neutral)
+- Provides insight into how respondents’ resilience perceptions relate to PFAS actions.
 
-The code:
+---
 
-Counts commas → source_count (# of sources)
-
-Treats "No" as zero-sources
-
-Builds aware_bin (Yes/No) = whether any source was listed
-
-Constructs a contingency table vs. the human-health-risk question
-
-Produces a tile heatmap (counts + % row)
-
-Result: a rapid check of internal consistency between two independent awareness questions.
-
-6. Awareness vs Preference for Monitoring Research (McNemar Test)
+## 11. Conditional Questions (ZBINARY_Y_N + Category Subfields)
 
 For the question:
 
-“Would you like research to monitor PFAS levels in lobsters?”
-
-the script:
-
-recodes missing as “No”
-
-builds a paired Yes/No variable set
-
-constructs a 2×2 contingency table
-
-runs mcnemar.test() to detect within-person discordance
-
-visualizes with a tile heatmap
-
-This evaluates whether individuals who are aware are more likely to support monitoring.
-
-7. Ordinal Scoring for Multi-Select or Multi-Intensity Questions
-
-Several questions require ordinal interpretation:
-
-“How concerned are you?” → {Not = 0, Somewhat = 1, Very = 2}
-
-“How involved…” → {Not involved = 0, Somewhat = 1, Very = 2}
-
-“Dependence on fishery” → {Not = 0, Some = 1, Highly = 2}
-
-“Ease of establishing a new territory” → {Not possible = 0, Possible = 1, Very easy = 2}
-
-The pipeline creates:
-
-ordered factors,
-
-numeric scores (subtracting 1),
-
-10-year age-bin boxplots,
-
-jitter overlays,
-
-non-parametric tests: kruskal.test(),
-
-monotonic trends: Spearman’s ρ.
-
-This enables consistent across-question comparisons of how age relates to intensity-based responses.
-
-8. Age-Based Analyses (Core Reproducible Section)
-
-For each major awareness / belief / perception question, the script performs:
-
-A) Age binned (10-year groups)
-
-Boxplot of response by bin
-
-Jittered points for raw visibility
-
-Lines marking per-bin means (for binary outcomes)
-
-Non-parametric tests (Kruskal–Wallis) for any difference across bins
-
-B) Age as continuous
-
-Scatter with jitter
-
-Logistic regression for binary outcomes
-
-Linear regression for ordinal-count outcomes
-
-Annotated lines showing regression formula, R², and p-value
-
-Color-coding points by age bin for visual clarity
-
-This section repeats for:
-
-heard of PFAS,
-
-PFAS as pollutant,
-
-PFAS in Maine,
-
-human-health risk awareness,
-
-concern levels,
-
-co-management involvement,
-
-dependence on the fishery,
-
-trust in state agencies,
-
-ease of establishing new fishing territory,
-
-voicing concerns.
-
-For each, the README makes it clear which trends were significant or not, and how visualization was standardized.
-
-9. Behavioral Response Section (PFAS Detected Scenarios)
-
-For seven “If PFAS were detected…” questions (continue fishing, sell, consume, new area, seek compensation, lobby management, leave fishery):
+> “Have you or people you know had to stop lobstering…? If yes, how did you deal with it?”
 
 The script:
+- Extracts a Yes/No variable (`ZBINARY_Y_N`)
+- Splits multi-tag follow-up categories (e.g., reasons/strategies)
+- Builds:
+  - tag × Yes/No contingency tables
+  - stacked proportion plots
+  - overall tag distribution summary
 
-Standardizes the Likert responses {not, somewhat, very likely}
+This captures variation in coping strategies among groups experiencing disruptions.
 
-Creates ordered factors (or binary recodes)
+---
 
-Builds:
+## 13. Outputs Produced
 
-column-wise proportion matrices
+The script generates:
 
-stacked bar charts
+- 40–50 boxplots (age × response)
+- 15+ stacked bar charts
+- Multiple heatmaps and mosaic plots
+- 10+ Sankey diagrams (binary and multi-level)
+- Regression summaries (logistic + linear)
+- Kruskal–Wallis and Spearman tests
+- Fisher’s exact and McNemar’s tests
+- Tag-based community-resilience charts
+- Zone-level awareness visualizations
 
-2D mosaics
+All outputs support internal consistency checks, trend detection, and PFAS-related attitude/behavior interpretation.
 
-binary collapsed analyses
+---
 
-Sankey diagrams showing joint transitions
+## 14. How to Run the Analysis
 
-Why Sankey diagrams?
+1. Install required packages:
 
-They show consistency/inconsistency across:
+```r
+install.packages(c(
+  "dplyr","tidyr","stringr","ggplot2","scales",
+  "networkD3","htmlwidgets"
+))
 
-selling vs consuming,
+2. Place the cleaned CSV (or the provided lobster_clean2.csv) in the project directory.
+3. Run the above script. I ran chunk by chunk and then snipped the output plots for some cleanup before presentation.
+4. View figures! 
 
-seeking compensation vs lobbying,
-
-fishing in new area vs ease of establishing new territory.
-
-Several high-quality Sankeys with fixed layout, gradient coloring, and custom SVG post-processing are included.
-
-10. Importance Factors: Community Resilience Themes
-
-Survey free-text responses (e.g., “strong community”, “apathy”, “resourcefulness”, etc.) are:
-
-split on commas,
-
-cleaned and normalized,
-
-expanded to long format (one row per tag),
-
-cross-tabulated vs PFAS-handling expectations (y/n/m),
-
-visualized as 100% stacked bars,
-
-colored by conceptual group (positive = green, negative = red, neutral = purple/grey).
-
-This section produces the “resilience factors” figure and table.
-
-11. Handling Conditional Questions (ZBINARY_Y_N + Category Fields)
-
-For the question:
-
-Have you or people you know had to stop lobstering…? If yes, how did you deal with it?
-
-The code:
-
-pulls the binary “yes/no” indicator (ZBINARY_Y_N)
-
-splits multi-tag categories (ZCAT_WHY_YES___…)
-
-builds a tag × Yes/No table
-
-visualizes stacked proportions
-
-provides overall tag distribution
-
-This allows assessing whether certain coping strategies differ across groups.
 
 ---
