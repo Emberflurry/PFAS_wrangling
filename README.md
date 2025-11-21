@@ -440,9 +440,317 @@ This captures variation in coping strategies among groups experiencing disruptio
 
 ---
 
+## 12. Exploratory Topic Modelling (attempt, haha).
+
+
+### 1. Data Source for Text Analysis
+
+Topic modeling focuses on long-form, open-ended responses, in particular:
+from the supplementary interview transcriptions/assistant notes from some of the interviews,
+text notes from general/any "Longform Notes" taken down by Phoebe or assistant and "Daily Observations" and "Methodological Reflections" and "Personal Reactions" and "Emerging Themes" and "Ethical Considerations"
+were copy-pasted using the clipboard tab in excel, through the formula box shortcut to allow for single-cell pasting of many multiline items. The resulting header-added csv is a very standard format of column variables and row observations with cell contents text-only.
+
+All of the following is implemented in Python (`pandas`) inside `tm_pfas1.ipynb` in local VSCODE and a second "long" version (see below).
+---
+
+### 2. Topic Modeling Pipeline (BERTopic) - tm_pfas1.ipynb
+
+We use a standard BERTopic pipeline (Bobak sample, parameter-tweaked):
+
+1. **Vectorization**
+
+   ```python
+   from sklearn.feature_extraction.text import CountVectorizer
+
+   vectorizer_model = CountVectorizer(
+       ngram_range=(1, 3),
+       stop_words="english",
+       min_df=1
+   )
+2. Dimensionality reduction & clustering
+
+UMAP is used to embed the document representations into a low-dimensional space.
+
+HDBSCAN clusters the UMAP embeddings into topics (with one cluster -1 reserved for outliers).
+
+UMAP/HDBSCAN hyperparameters follow Dr. Bobak’s example code with minor tuning (e.g., neighborhood size and minimum cluster size) to produce a small number of interpretable clusters; exact values are recorded in the notebook.
+
+3. BERTopic Model:
+4. ```excel
+from umap import UMAP
+from hdbscan import HDBSCAN
+from bertopic import BERTopic
+from bertopic.representation import KeyBERTInspired
+
+rep_model = KeyBERTInspired()
+topic_model = BERTopic(
+    embedding_model="all-mpnet-base-v2",
+    umap_model=umap_model,
+    hdbscan_model=hdbscan_model,
+    vectorizer_model=vectorizer_model,
+    calculate_probabilities=True,
+    representation_model=rep_model,
+    verbose=True,
+)
+
+topics, probs = topic_model.fit_transform(documents)
+```
+embedding_model="all-mpnet-base-v2" provides sentence embeddings.
+
+KeyBERTInspired creates human-readable topic labels/keywords.
+4. model saving and outputs:
+```excel
+save_dir = r"...\tmres"
+model_path = os.path.join(save_dir, "topic_model_python")
+topic_model.save(model_path)
+```
+Main derived outputs:
+Per-topic keyword table: 
+```excel
+topic_info = topic_model.get_topic_info()
+valid_topic_ids = topic_info[topic_info.Topic != -1].Topic.tolist()
+
+topics_data = []
+for topic_id in valid_topic_ids:
+    topic = topic_model.get_topic(topic_id)
+    if topic is None:
+        continue
+    for word, weight in topic:
+        topics_data.append((topic_id, word, weight))
+
+topics_df = pd.DataFrame(topics_data, columns=["Topic", "Word", "Weight"])
+csv_path = os.path.join(save_dir, "topic_keywords_2.csv")
+topics_df.to_csv(csv_path, index=False)
+
+```
+This CSV is what we use for reporting example keywords per topic.
+Also,
+Per-document topic assignments:
+```excel
+df_text = df_text.reset_index(drop=True)
+df_topics_docs = df_text.copy()
+df_topics_docs["Topic"] = topics
+```
+These assignments were used qualitatively (e.g., to inspect which responses fall into each topic), but not as primary quantitative variables in the main models.
+
+5. Visualizations (exploratory)
+
+topic_model.visualize_topics() – 2D topic layout.
+
+topic_model.visualize_hierarchy() – hierarchical topic tree.
+
+topic_model.hierarchical_topics(documents) + get_topic_tree() – printed hierarchical structure.
+
+These plots were used for interpretation only and are not required to reproduce the cleaned dataset.
+
+### 3. Sentiment Analysis (VADER, Exploratory)
+
+Sentiment analysis was run on selected open-ended questions (e.g., experiences shaping trust in scientists, reflections on regulations, and community responses). Code again follows Dr. Bobak’s sample, adapted to our column names.
+
+Scoring text
+Use NLTK’s SentimentIntensityAnalyzer (VADER).
+For each response, compute the compound sentiment score in [-1, 1].
+Store this score as a new column (e.g., sentiment_compound).
+
+Use of sentiment variables
+Sentiment scores were explored descriptively (e.g., distributions, boxplots across groups).
+They were not used as primary predictors/outcomes in the main inferential models due to small sample size and interpretive complexity.
+
+All sentiment code and column names are documented in the corresponding Python script/notebook; anyone with the raw CSV and this README can re-run it.
+
+
+### Additional topic and sentiment analysis (tm_pfas_long.ipynb)
+The notebook `tm_pfas_long.ipynb` extends the exploratory work described above, again using code adapted from Dr. Bobak’s sample notebooks and refit for this dataset. This section documents only the **additional** steps that are not already covered in the previous topic-model/sentiment chunk.
+
+---
+
+### 1. Longform Data Source
+
+- Input file: `longform_conv1.csv`
+- Key columns used:
+  - `Response` – longform text (e.g., notes from conversations/interviews)
+  - `Age` – respondent age (numeric)
+- Pre-processing:
+  - Drop rows with missing `Response`.
+  - Strip whitespace and cast to `str`.
+  - Store cleaned responses in a list `documents` for BERTopic.
+
+All BERTopic settings (vectorizer, UMAP, HDBSCAN, embedding model, representation model) follow the same structure as in `tm_pfas1.ipynb`, with minor hyperparameter tweaks (e.g., `ngram_range=(1, 2)` and `n_neighbors=10`).
+
+---
+
+### 2. Topics Over Age (Using `topics_over_time`)
+
+To explore how themes vary with age, the `Age` variable is used as a pseudo-“time” axis:
+
+```python
+df_text["Age"] = pd.to_numeric(df_text["Age"], errors="coerce")
+df_age = df_text.dropna(subset=["Age"]).reset_index(drop=True)
+
+documents_age = df_age["Response"].astype(str).tolist()
+ages = df_age["Age"].astype(float).tolist()
+
+updated_topics, _ = topic_model.transform(documents_age)
+
+topics_over_time = topic_model.topics_over_time(
+    documents_age,
+    ages,
+    updated_topics
+)
+
+fig = topic_model.visualize_topics_over_time(
+    topics_over_time,
+    title="Longform Topics Across Age"
+)
+```
+This produces an exploratory figure of topic prevalence across age, not used in inferential models.
+
+## 3. Static Intertopic Distance Map (PCA)
+
+In addition to BERTopic’s interactive visualizations, a static intertopic distance map is created using PCA on the internal topic embeddings:
+```python
+from sklearn.decomposition import PCA
+
+topic_info = topic_model.get_topic_info()
+valid_topic_ids = topic_info[topic_info.Topic != -1].Topic.tolist()
+
+emb = topic_model.topic_embeddings_[valid_topic_ids]
+pca = PCA(n_components=2, random_state=42)
+coords = pca.fit_transform(emb)
+
+plt.figure(figsize=(6, 6))
+plt.scatter(coords[:, 0], coords[:, 1])
+
+for (x, y, tid) in zip(coords[:, 0], coords[:, 1], valid_topic_ids):
+    plt.text(x, y, f"{tid}", fontsize=9, ha="center", va="center")
+
+plt.xlabel("PCA 1")
+plt.ylabel("PCA 2")
+plt.title("Intertopic Distance Map (PCA, static)")
+plt.gca().set_aspect("equal", "box")
+plt.grid(True)
+plt.show()
+```
+^This produces a paper-friendly static figure showing relative distances between topics.
+## 4. Removing “Lobster” Words and Refitting Topics
+
+To reduce trivial clustering driven by repeated domain words, a second round of topic modeling is run on text with lobster-related terms removed:
+```python
+import re
+
+df["ResponseNoLobster"] = (
+    df["Response"]
+      .fillna("")
+      .str.replace(r"\b(lobster|lobsters|lobstermen|lobstering)\b", "",
+                   flags=re.IGNORECASE, regex=True)
+      .str.replace(r"\s{2,}", " ", regex=True)
+      .str.strip()
+)
+
+TEXT_COL = "ResponseNoLobster"
+df_text = df.dropna(subset=[TEXT_COL]).copy()
+df_text[TEXT_COL] = df_text[TEXT_COL].astype(str).str.strip()
+
+documents = df_text[TEXT_COL].tolist()
+
+# BERTopic refit with same architecture
+topic_model = BERTopic(
+    embedding_model="all-mpnet-base-v2",
+    umap_model=umap_model,
+    hdbscan_model=hdbscan_model,
+    vectorizer_model=vectorizer_model,
+    calculate_probabilities=True,
+    representation_model=KeyBERTInspired(),
+    verbose=True,
+)
+
+topics, probs = topic_model.fit_transform(documents)
+```
+Outputs (saved in tmres_longform1/):
+topic_model_longform1 – model with lobster terms removed.
+topic_keywords_longform1.csv – topic–keyword–weight table.
+longform_with_topics.csv – per-response topic assignments.
+
+## 5. Sentiment vs Age (VADER)
+
+Using VADER sentiment on the same longform responses, the notebook explores how sentiment changes with age.
+```python
+from nltk.sentiment import SentimentIntensityAnalyzer
+sia = SentimentIntensityAnalyzer()
+
+df_text["Age"] = pd.to_numeric(df_text["Age"], errors="coerce")
+df_sent = df_text.dropna(subset=["Age", TEXT_COL]).copy()
+
+df_sent["sentiment"] = df_sent[TEXT_COL].apply(
+    lambda x: sia.polarity_scores(str(x))["compound"]
+)
+```
+Exploratory analyses:
+Summary + correlation:
+```python
+print(df_sent["sentiment"].describe())
+corr = df_sent[["Age", "sentiment"]].corr().loc["Age", "sentiment"]
+
+```
+Scatter + regression line:
+```python
+m, b = np.polyfit(df_sent["Age"], df_sent["sentiment"], 1)
+# scatter of sentiment vs Age with fitted line
+#no relationship at all. totally random.
+```
+Age-group barplot: 
+```python
+bins = [0, 29, 39, 49, 59, 69, 79, 120]
+labels = ["<30", "30–39", "40–49", "50–59", "60–69", "70–79", "80+"]
+
+df_sent["AgeGroup"] = pd.cut(df_sent["Age"], bins=bins, labels=labels, right=True)
+sent_by_group = df_sent.groupby("AgeGroup")["sentiment"].mean().reset_index()
+# bar plot of mean sentiment by AgeGroup
+#also not very meaningful. i guess thats meaning in itself tho.
+```
+These are descriptive only and not used in the main inferential analysis.
+## 6. Sentiment by Topic (ResponseNoLobster)
+Finally, sentiment is examined across BERTopic topics using the lobster-removed text:
+```python
+TEXT_COL = "ResponseNoLobster"
+
+df_text = df.dropna(subset=[TEXT_COL]).copy()
+df_text[TEXT_COL] = df_text[TEXT_COL].astype(str).str.strip()
+df_text = df_text.reset_index(drop=True)
+
+df_topics_docs = df_text.copy()
+df_topics_docs["Topic"] = topics  # from lobster-removed BERTopic model
+
+# VADER sentiment
+df_topics_docs["sentiment"] = df_topics_docs[TEXT_COL].apply(
+    lambda x: sia.polarity_scores(str(x))["compound"]
+)
+
+valid = df_topics_docs[df_topics_docs["Topic"] != -1].copy()
+topic_sent_summary = (
+    valid.groupby("Topic")["sentiment"]
+         .agg(["count", "mean", "std", "median", "min", "max"])
+         .reset_index()
+)
+```
+Visualization and test:
+Boxplot of sentiment by topic with a horizontal line at 0 (neutral).
+Kruskal–Wallis test to assess whether sentiment distributions differ across topics.
+Again, these sentiment–topic comparisons are exploratory and serve as qualitative context rather than primary quantitative findings.
+
+
+### 4. Role of Topic & Sentiment Analyses
+
+Both the BERTopic topics and VADER sentiment scores and visuals are used:
+as exploratory tools to better understand themes and tones in qualitative responses, and
+as context for interpreting the quantitative survey findings.
+
+They do not drive the core inferential results (regression models, ranking analyses), but the full pipeline is included here and in the notebook to support transparency and reproducibility. A few of the output plots were shown in the presentation for proof of attempt and showing that while technically separable into categories, the topics and other modelling were unsuccessful at capturing meaningful clusters (they all had the same words/topics even after filtering out filler words and variations of the word Lobster.)
+
+
 ## 13. Outputs Produced
 
-The script generates:
+The script(s) generates:
 
 - 40–50 boxplots (age × response)
 - 15+ stacked bar charts
@@ -453,6 +761,7 @@ The script generates:
 - Fisher’s exact and McNemar’s tests
 - Tag-based community-resilience charts
 - Zone-level awareness visualizations
+- Exploratory Topic hierarchies, PCA visuals, and boxplots/scatters for initial (failed) interesting topic visuals.
 
 All outputs support internal consistency checks, trend detection, and PFAS-related attitude/behavior interpretation.
 
@@ -470,7 +779,9 @@ install.packages(c(
 
 2. Place the cleaned CSV (or the provided lobster_clean2.csv) in the project directory.
 3. Run the above script. I ran chunk by chunk and then snipped the output plots for some cleanup before presentation.
-4. View figures! 
+4. View figures!
+
+5. for topic modelling, use the longform_conv1.csv file (interview docs likely won't be released for privacy reasons, but this should contain all needed info).
 
 
 ---
