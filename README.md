@@ -3,7 +3,7 @@
 ## 1. Project Overview
 
 This repository contains the full data wrangling and analysis pipeline for a survey of lobster fishery stakeholders’ perceptions of PFAS contamination and other fisheries-related issues.
-1. Obtain the raw data in the above repository files,
+1. Obtain the raw data in the above repository files.
 2. Recreate the cleaned dataset if you want, and
 3. Reproduce all analyses and visualizations, including the categorical comparisons, regressions, ranking analysis of perceived concerns, and attempted topic modelling and sentiment analysis. Many more exploratory analyses were conducted and not included for brevity here - most variable correlations were deemed uninteresting given the low power and mixed results of comparisons, and also the domain knowledge that (mostly Phoebe) had about how the questions were answered and what kind of history drove some of the lobstermen's opinions.
 
@@ -22,15 +22,15 @@ To follow:
 - **Mode:** Online self-administered survey with in-person extra notes and conversations recorded as supplementary longform interview notes
 - **Output format:** Google Forms, exported as CSV from app.
 
-The raw Google Forms export includes:
-(see more detail in 3: Excel-based cleaning)
+The raw Google Forms export (JED_cleaned_LobstermenResponses) includes:
+(has several tabs, including the raw forms output from "Form Responses 1 Raw" tab -- see more detail in 3: Excel-based cleaning)
 - Timestamp / response metadata
 - Demographics: Gender, age, Town
 - Fishing zone information (A-G)
 - Knowledge/awareness questions (Pollution, PFAS awareness)
 - Attitudinal questions
 - **Issue ranking questions** (the 6–7 issues that are analyzed in `ranking1.Rmd`)
-
+- Longform interview question(s) dumps (longform_conv1.csv)
 ### 2.2 Original Raw File
 
 - **File type:** CSV exported from Google Forms
